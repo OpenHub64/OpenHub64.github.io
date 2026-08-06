@@ -1,1 +1,1 @@
-# this is OpenHub[click me!](https://openhub64.github.io/#)
+# this is OpenHub[ click me to open the website](https://openhub64.github.io/#)
