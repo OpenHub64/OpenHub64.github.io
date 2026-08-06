@@ -4,301 +4,281 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,">
-    <title>Global Chat - OpenHub</title>
+    <title>OpenHub Chat</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f4f4f9;
-            color: #333;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-
-        /* Navbar */
-        .navbar {
-            background-color: #1a1a1a;
-            color: white;
-            padding: 15px 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .navbar h1 { margin: 0; font-size: 20px; color: #3ECF8E; }
-        .back-btn {
-            color: white;
-            text-decoration: none;
-            background: #333;
-            padding: 8px 15px;
-            border-radius: 5px;
-            font-size: 14px;
-        }
-        .back-btn:hover { background: #444; }
-
-        /* Chat Layout */
-        .chat-container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            max-width: 800px;
-            margin: 0 auto;
-            width: 100%;
-            background: white;
-            box-shadow: 0 0 10px rgba(0,0,0,0.05);
-        }
-
-        /* Messages Area */
-        #messagesBox {
-            flex: 1;
-            padding: 20px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            background-color: #ffffff;
-        }
-
-        .message {
-            display: flex;
-            gap: 10px;
-            align-items: flex-start;
-            max-width: 80%;
-        }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #36393f; color: #dcddde; display: flex; height: 100vh; overflow: hidden; }
         
-        .message.self {
-            align-self: flex-end;
-            flex-direction: row-reverse;
-        }
+        /* Layout Grid */
+        #app { display: flex; width: 100%; height: 100%; }
+        
+        /* Far Left: Server List */
+        .server-nav { width: 72px; background-color: #202225; display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 10px; overflow-y: auto; }
+        .server-icon { width: 48px; height: 48px; background-color: #36393f; border-radius: 50%; display: flex; justify-content: center; align-items: center; cursor: pointer; transition: 0.2s; font-weight: bold; color: white; }
+        .server-icon:hover, .server-icon.active { border-radius: 15px; background-color: #3ECF8E; }
+        .server-icon.hub { background-color: #5865F2; }
+        .divider { width: 32px; height: 2px; background-color: #2d2f32; border-radius: 1px; }
 
-        .msg-avatar {
-            width: 35px;
-            height: 35px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 1px solid #ccc;
-        }
+        /* Inner Left: Channel/Friend List */
+        .sidebar { width: 240px; background-color: #2f3136; display: flex; flex-direction: column; }
+        .sidebar-header { padding: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.2); font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+        .list-container { flex: 1; overflow-y: auto; padding: 10px; }
+        .list-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 4px; cursor: pointer; margin-bottom: 2px; }
+        .list-item:hover, .list-item.active { background-color: #393c43; color: white; }
+        .list-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
 
-        .msg-content-wrapper {
-            display: flex;
-            flex-direction: column;
-        }
-        .message.self .msg-content-wrapper { align-items: flex-end; }
+        /* Main Chat Area */
+        .chat-area { flex: 1; display: flex; flex-direction: column; background-color: #36393f; }
+        .chat-header { padding: 15px; border-bottom: 1px solid #282a2e; font-weight: bold; font-size: 18px; display: flex; justify-content: space-between; }
+        .messages-box { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+        
+        /* Messages */
+        .message { display: flex; gap: 15px; }
+        .msg-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+        .msg-header { display: flex; gap: 10px; align-items: baseline; margin-bottom: 5px; }
+        .msg-username { font-weight: bold; color: white; }
+        .msg-time { font-size: 12px; color: #72767d; }
+        .msg-content { line-height: 1.4; }
 
-        .msg-username {
-            font-size: 12px;
-            color: #888;
-            margin-bottom: 3px;
-        }
-
-        .msg-bubble {
-            background: #f1f1f1;
-            padding: 10px 15px;
-            border-radius: 15px;
-            border-top-left-radius: 2px;
-            font-size: 14px;
-            line-height: 1.4;
-        }
-
-        .message.self .msg-bubble {
-            background: #3ECF8E;
-            color: white;
-            border-radius: 15px;
-            border-top-right-radius: 2px;
-            border-top-left-radius: 15px;
-        }
-
-        /* Input Area */
-        .input-area {
-            padding: 15px 20px;
-            background: #f8f9fa;
-            border-top: 1px solid #eee;
-            display: flex;
-            gap: 10px;
-        }
-        #messageInput {
-            flex: 1;
-            padding: 12px;
-            border: 1px solid #ccc;
-            border-radius: 25px;
-            outline: none;
-            font-size: 15px;
-        }
-        #sendBtn {
-            background-color: #3ECF8E;
-            color: white;
-            border: none;
-            padding: 0 20px;
-            border-radius: 25px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        #sendBtn:hover { background-color: #2eb87c; }
-
+        /* Input */
+        .input-area { padding: 20px; }
+        .input-wrapper { background-color: #40444b; border-radius: 8px; display: flex; padding: 10px 15px; }
+        .input-wrapper input { flex: 1; background: transparent; border: none; color: white; outline: none; font-size: 15px; }
+        
+        button.action-btn { background: #3ECF8E; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        button.action-btn:hover { opacity: 0.8; }
+        a.back-btn { color: #aaa; text-decoration: none; font-size: 14px; }
+        a.back-btn:hover { color: white; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
-    <nav class="navbar">
-        <h1>💬 OpenHub Global Chat</h1>
-        <a href="index.html" class="back-btn">← Back to Hub</a>
-    </nav>
-
-    <div class="chat-container">
-        <div id="messagesBox">
-            <div style="text-align: center; color: #888; font-size: 14px; padding: 20px;">
-                Loading messages...
-            </div>
-        </div>
-        
-        <form class="input-area" id="chatForm">
-            <input type="text" id="messageInput" placeholder="Type a message..." autocomplete="off" required>
-            <button type="submit" id="sendBtn">Send</button>
-        </form>
+<div id="app">
+    <div class="server-nav" id="serverNav">
+        <div class="server-icon hub active" id="btnHub" title="Hub & DMs">💬</div>
+        <div class="divider"></div>
+        <div id="serverList"></div>
+        <div class="server-icon" id="btnCreateServer" style="color: #3ECF8E; background: #2f3136;" title="Create Server">+</div>
+        <div class="divider"></div>
+        <a href="index.html" class="server-icon" style="font-size:12px; background: #ed4245; text-decoration:none;">Exit</a>
     </div>
 
-    <script>
-        // 1. Configuration
-        const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
-        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    <div class="sidebar">
+        <div class="sidebar-header" id="sidebarHeader">Direct Messages</div>
+        <div class="list-container" id="sidebarList">
+            </div>
+    </div>
 
-        let currentUser = null;
-        const messagesBox = document.getElementById('messagesBox');
-        const chatForm = document.getElementById('chatForm');
-        const messageInput = document.getElementById('messageInput');
+    <div class="chat-area">
+        <div class="chat-header">
+            <span id="chatTitle"># global-chat</span>
+            <button id="inviteBtn" class="action-btn" style="display:none;">+ Invite Friend</button>
+        </div>
+        <div class="messages-box" id="messagesBox"></div>
+        <form class="input-area" id="chatForm">
+            <div class="input-wrapper">
+                <input type="text" id="messageInput" placeholder="Message..." autocomplete="off" required>
+            </div>
+        </form>
+    </div>
+</div>
 
-        // Default avatar if user doesn't have one
-        const DEFAULT_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>";
+<script>
+    // 1. CONFIGURATION
+    const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // 2. Authentication Check
-        async function checkAuth() {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (!session) {
-                // If they aren't logged in, redirect them back to the login page
-                window.location.href = 'index.html';
-                return;
-            }
-            currentUser = session.user;
-            
-            // Load messages and subscribe to new ones
-            loadMessages();
-            subscribeToRealtime();
+    let currentUser = null;
+    let friends = [];
+    
+    // Chat State: mode can be 'global', 'dm', or 'server'
+    let currentMode = 'global';
+    let currentTargetId = null; // Either friend's UUID or Server's ID
+
+    const DEFAULT_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>";
+
+    // DOM Elements
+    const messagesBox = document.getElementById('messagesBox');
+    const chatTitle = document.getElementById('chatTitle');
+    const sidebarList = document.getElementById('sidebarList');
+    const sidebarHeader = document.getElementById('sidebarHeader');
+    const serverList = document.getElementById('serverList');
+    const inviteBtn = document.getElementById('inviteBtn');
+
+    // Boot Up
+    async function init() {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return window.location.href = 'index.html';
+        currentUser = session.user;
+
+        await loadFriends();
+        await loadServers();
+        setMode('global', null, 'global-chat');
+        setupRealtime();
+    }
+
+    // --- DATA FETCHING ---
+    async function loadFriends() {
+        const { data } = await supabase.from('friendships').select(`
+            status, user_id, friend_id,
+            requester:profiles!friendships_user_id_fkey(id, username, avatar_base64),
+            receiver:profiles!friendships_friend_id_fkey(id, username, avatar_base64)
+        `).eq('status', 'accepted').or(`user_id.eq.${currentUser.id},friend_id.eq.${currentUser.id}`);
+        
+        friends = data?.map(rel => rel.user_id === currentUser.id ? rel.receiver : rel.requester) || [];
+    }
+
+    async function loadServers() {
+        const { data } = await supabase.from('servers').select(`
+            id, name, server_members!inner(user_id)
+        `).eq('server_members.user_id', currentUser.id);
+        
+        serverList.innerHTML = '';
+        if (data) {
+            data.forEach(server => {
+                const div = document.createElement('div');
+                div.className = 'server-icon';
+                div.textContent = server.name.charAt(0).toUpperCase();
+                div.title = server.name;
+                div.onclick = () => setMode('server', server.id, server.name);
+                serverList.appendChild(div);
+            });
+        }
+    }
+
+    // --- UI ROUTING ---
+    function setMode(mode, targetId, titleText) {
+        currentMode = mode;
+        currentTargetId = targetId;
+        chatTitle.textContent = mode === 'global' ? '# global-chat' : (mode === 'server' ? `# ${titleText}` : `@ ${titleText}`);
+        inviteBtn.style.display = mode === 'server' ? 'block' : 'none';
+        
+        // Update Sidebars
+        if (mode === 'global' || mode === 'dm') {
+            sidebarHeader.textContent = "Direct Messages";
+            sidebarList.innerHTML = `<div class="list-item ${mode==='global'?'active':''}" onclick="setMode('global', null, 'global-chat')">🌐 Global Chat</div>`;
+            friends.forEach(f => {
+                sidebarList.innerHTML += `
+                    <div class="list-item ${currentTargetId === f.id ? 'active' : ''}" onclick="setMode('dm', '${f.id}', '${f.username}')">
+                        <img class="list-avatar" src="${f.avatar_base64 || DEFAULT_AVATAR}"> ${f.username}
+                    </div>`;
+            });
+        } else if (mode === 'server') {
+            sidebarHeader.textContent = titleText;
+            sidebarList.innerHTML = `<div class="list-item active"># general</div>`;
+            // You could fetch server members here and list them below!
+        }
+        
+        loadMessages();
+    }
+
+    // --- MESSAGING LOGIC ---
+    async function loadMessages() {
+        messagesBox.innerHTML = '<div style="text-align:center; padding:20px;">Loading...</div>';
+        let query;
+
+        if (currentMode === 'global') {
+            query = supabase.from('messages').select(`*, profiles(username, avatar_base64)`).is('profile_id', null).order('created_at', { ascending: false }).limit(50);
+            // Fallback since our old table used profile_id for global chat
+            query = supabase.from('messages').select(`*, profiles(username, avatar_base64)`).order('created_at', { ascending: false }).limit(50);
+        } else if (currentMode === 'server') {
+            query = supabase.from('server_messages').select(`*, profiles(username, avatar_base64)`).eq('server_id', currentTargetId).order('created_at', { ascending: false }).limit(50);
+        } else if (currentMode === 'dm') {
+            query = supabase.from('dms').select(`*, profiles!dms_sender_id_fkey(username, avatar_base64)`).or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${currentTargetId}),and(sender_id.eq.${currentTargetId},receiver_id.eq.${currentUser.id})`).order('created_at', { ascending: false }).limit(50);
         }
 
-        // 3. UI Helper: Render a single message
-        function renderMessage(msgData) {
-            // Check if this message was sent by the current user
-            const isSelf = msgData.profile_id === currentUser.id;
-            
-            // Safely get profile info (fallback if missing)
-            const username = msgData.profiles?.username || "Unknown User";
-            const avatar = msgData.profiles?.avatar_base64 || DEFAULT_AVATAR;
-            
-            const msgDiv = document.createElement('div');
-            msgDiv.className = `message ${isSelf ? 'self' : ''}`;
-            
-            msgDiv.innerHTML = `
-                <img class="msg-avatar" src="${avatar}" alt="Avatar">
-                <div class="msg-content-wrapper">
-                    <div class="msg-username">${username}</div>
-                    <div class="msg-bubble">${escapeHTML(msgData.content)}</div>
+        const { data } = await query;
+        messagesBox.innerHTML = '';
+        if (data) data.reverse().forEach(renderMessage);
+    }
+
+    document.getElementById('chatForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = document.getElementById('messageInput');
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+
+        if (currentMode === 'global') {
+            await supabase.from('messages').insert([{ profile_id: currentUser.id, content: text }]);
+        } else if (currentMode === 'server') {
+            await supabase.from('server_messages').insert([{ profile_id: currentUser.id, server_id: currentTargetId, content: text }]);
+        } else if (currentMode === 'dm') {
+            await supabase.from('dms').insert([{ sender_id: currentUser.id, receiver_id: currentTargetId, content: text }]);
+        }
+    });
+
+    function renderMessage(msg) {
+        // Handle slightly different joins depending on table
+        const profile = msg.profiles || (msg.sender_id ? msg.profiles : null) || { username: 'Unknown', avatar_base64: DEFAULT_AVATAR };
+        
+        const div = document.createElement('div');
+        div.className = 'message';
+        div.innerHTML = `
+            <img class="msg-avatar" src="${profile.avatar_base64 || DEFAULT_AVATAR}">
+            <div>
+                <div class="msg-header">
+                    <span class="msg-username">${profile.username}</span>
+                    <span class="msg-time">${new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                 </div>
-            `;
-            
-            messagesBox.appendChild(msgDiv);
-            scrollToBottom();
+                <div class="msg-content">${msg.content.replace(/[&<>'"]/g, t => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[t]))}</div>
+            </div>`;
+        messagesBox.appendChild(div);
+        messagesBox.scrollTop = messagesBox.scrollHeight;
+    }
+
+    // --- SERVER CREATION & INVITES ---
+    document.getElementById('btnCreateServer').addEventListener('click', async () => {
+        const name = prompt("Enter new Server name:");
+        if (!name) return;
+        
+        const { data, error } = await supabase.from('servers').insert([{ name, owner_id: currentUser.id }]).select().single();
+        if (data) {
+            await supabase.from('server_members').insert([{ server_id: data.id, user_id: currentUser.id }]);
+            await loadServers();
+            setMode('server', data.id, data.name);
         }
+    });
 
-        // Helper to prevent XSS attacks (people sending malicious code in chat)
-        function escapeHTML(str) {
-            return str.replace(/[&<>'"]/g, 
-                tag => ({
-                    '&': '&amp;',
-                    '<': '&lt;',
-                    '>': '&gt;',
-                    "'": '&#39;',
-                    '"': '&quot;'
-                }[tag] || tag)
-            );
+    inviteBtn.addEventListener('click', async () => {
+        if(friends.length === 0) return alert("You have no friends to invite yet!");
+        let promptText = "Type the number of the friend to invite:\n";
+        friends.forEach((f, i) => promptText += `${i+1}. ${f.username}\n`);
+        
+        const idx = parseInt(prompt(promptText)) - 1;
+        if (friends[idx]) {
+            await supabase.from('server_members').insert([{ server_id: currentTargetId, user_id: friends[idx].id }]);
+            alert(`${friends[idx].username} was added to the server!`);
         }
+    });
 
-        function scrollToBottom() {
-            messagesBox.scrollTop = messagesBox.scrollHeight;
-        }
+    // --- REALTIME ---
+    function setupRealtime() {
+        supabase.channel('custom-all-channel')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+                if(currentMode === 'global') fetchAndRenderSingle(payload.new, 'messages');
+            })
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'server_messages' }, payload => {
+                if(currentMode === 'server' && payload.new.server_id === currentTargetId) fetchAndRenderSingle(payload.new, 'server_messages');
+            })
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dms' }, payload => {
+                if(currentMode === 'dm' && (payload.new.sender_id === currentTargetId || payload.new.receiver_id === currentTargetId)) {
+                    fetchAndRenderSingle(payload.new, 'dms');
+                }
+            })
+            .subscribe();
+    }
 
-        // 4. Load initial messages
-        async function loadMessages() {
-            // Fetch last 50 messages, joining the profiles table to get usernames and avatars
-            const { data, error } = await supabaseClient
-                .from('messages')
-                .select(`
-                    id, 
-                    content, 
-                    profile_id, 
-                    created_at,
-                    profiles (username, avatar_base64)
-                `)
-                .order('created_at', { ascending: false })
-                .limit(50);
+    async function fetchAndRenderSingle(rawMsg, table) {
+        // Quick fetch to get the profile picture of the sender for the realtime message
+        const profileCol = table === 'dms' ? 'sender_id' : 'profile_id';
+        const { data } = await supabase.from('profiles').select('username, avatar_base64').eq('id', rawMsg[profileCol]).single();
+        rawMsg.profiles = data;
+        renderMessage(rawMsg);
+    }
 
-            if (error) {
-                messagesBox.innerHTML = `<div style="color:red; text-align:center;">Error loading messages: ${error.message}</div>`;
-                return;
-            }
-
-            messagesBox.innerHTML = ''; // Clear loading text
-            
-            // Since we fetched descending (newest first) to get the latest 50, we need to reverse them to display oldest to newest top-to-bottom
-            data.reverse().forEach(renderMessage);
-        }
-
-        // 5. Send a new message
-        chatForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const text = messageInput.value.trim();
-            if (!text) return;
-
-            // Clear input immediately for better UX
-            messageInput.value = '';
-
-            const { error } = await supabaseClient
-                .from('messages')
-                .insert([{ profile_id: currentUser.id, content: text }]);
-
-            if (error) {
-                alert("Error sending message: " + error.message);
-            }
-        });
-
-        // 6. Listen for new messages in Realtime
-        function subscribeToRealtime() {
-            supabaseClient
-                .channel('public:messages')
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
-                    // Because real-time payloads don't automatically join relational tables, 
-                    // we need to quickly fetch the profile info for the new message.
-                    const { data: profileData } = await supabaseClient
-                        .from('profiles')
-                        .select('username, avatar_base64')
-                        .eq('id', payload.new.profile_id)
-                        .single();
-
-                    // Combine the raw message with the profile data
-                    const fullMessage = {
-                        ...payload.new,
-                        profiles: profileData
-                    };
-
-                    renderMessage(fullMessage);
-                })
-                .subscribe();
-        }
-
-        // Boot up
-        checkAuth();
-    </script>
+    init();
+</script>
 </body>
 </html>
