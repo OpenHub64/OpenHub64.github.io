@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
     <title>My Supabase App</title>
     <style>
         body {
@@ -58,7 +59,8 @@
         const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
         
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        // FIX: Changed variable name to 'supabaseClient' so it doesn't conflict with the global 'supabase' object
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         // 2. Select HTML elements
         const testBtn = document.getElementById('testBtn');
@@ -70,9 +72,8 @@
             
             try {
                 // Example: Trying to fetch data from a table named 'test_table'
-                // Note: You must have a table named 'test_table' in your Supabase database for this to return data
-                const { data, error } = await supabase
-                    .from('test_table') // Replace with your actual table name
+                const { data, error } = await supabaseClient // FIX: Updated variable name here too
+                    .from('test_table') 
                     .select('*')
                     .limit(5);
 
