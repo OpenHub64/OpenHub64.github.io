@@ -40,7 +40,7 @@
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 4px;
-            box-sizing: border-box; /* Ensures padding doesn't push width past 100% */
+            box-sizing: border-box;
         }
         .button-group {
             display: flex;
@@ -49,7 +49,7 @@
         }
         button {
             flex: 1;
-            background-color: #3ECF8E; /* Supabase Green */
+            background-color: #3ECF8E; 
             color: white;
             border: none;
             padding: 10px;
@@ -68,10 +68,20 @@
             padding: 10px;
             border-radius: 4px;
             text-align: center;
-            display: none; /* Hidden by default */
+            display: none;
         }
         .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        
+        /* New styles for the logged-in view */
+        #loggedInUI {
+            display: none; /* Hidden by default */
+            text-align: center;
+        }
+        #loggedInUI h3 {
+            margin-bottom: 20px;
+            color: #3ECF8E;
+        }
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -79,24 +89,33 @@
 <body>
 
     <div class="container">
-        <h2>Welcome Back</h2>
         
-        <div class="form-group">
-            <label for="email">Email</label>
-            <input type="email" id="email" placeholder="you@example.com" required>
-        </div>
-        
-        <div class="form-group">
-            <label for="password">Password</label>
-            <input type="password" id="password" placeholder="••••••••" required>
+        <div id="loggedOutUI">
+            <h2>Welcome Back</h2>
+            
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" placeholder="you@example.com" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="••••••••" required>
+            </div>
+
+            <div class="button-group">
+                <button id="loginBtn">Log In</button>
+                <button id="signupBtn" class="secondary">Sign Up</button>
+            </div>
         </div>
 
-        <div class="button-group">
-            <button id="loginBtn">Log In</button>
-            <button id="signupBtn" class="secondary">Sign Up</button>
+        <div id="loggedInUI">
+            <h3 id="welcomeText">You are logged in!</h3>
+            <button id="logoutBtn" class="secondary">Log Out</button>
         </div>
         
         <div id="message"></div>
+
     </div>
 
     <script>
@@ -110,68 +129,85 @@
         const passwordInput = document.getElementById('password');
         const loginBtn = document.getElementById('loginBtn');
         const signupBtn = document.getElementById('signupBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
+        
+        const loggedOutUI = document.getElementById('loggedOutUI');
+        const loggedInUI = document.getElementById('loggedInUI');
+        const welcomeText = document.getElementById('welcomeText');
         const messageDiv = document.getElementById('message');
 
         // Helper function to show messages
         function showMessage(text, isError = false) {
             messageDiv.style.display = 'block';
             messageDiv.textContent = text;
-            if (isError) {
-                messageDiv.className = 'error';
-            } else {
-                messageDiv.className = 'success';
-            }
+            messageDiv.className = isError ? 'error' : 'success';
         }
 
-        // 3. Handle Sign Up
+        // Helper function to hide the message box
+        function clearMessage() {
+            messageDiv.style.display = 'none';
+        }
+
+        // 3. Listen for Authentication Changes (The Magic Part!)
+        // This runs automatically when the page loads, and anytime the user logs in or out.
+        supabaseClient.auth.onAuthStateChange((event, session) => {
+            if (session) {
+                // User is logged in (e.g., they just clicked the email link)
+                loggedOutUI.style.display = 'none';
+                loggedInUI.style.display = 'block';
+                welcomeText.textContent = `Welcome, ${session.user.email}!`;
+                clearMessage();
+            } else {
+                // User is logged out
+                loggedInUI.style.display = 'none';
+                loggedOutUI.style.display = 'block';
+                emailInput.value = '';
+                passwordInput.value = '';
+            }
+        });
+
+        // 4. Handle Sign Up
         signupBtn.addEventListener('click', async () => {
+            clearMessage();
             const email = emailInput.value;
             const password = passwordInput.value;
 
-            if (!email || !password) {
-                return showMessage("Please enter both email and password.", true);
-            }
+            if (!email || !password) return showMessage("Please enter both email and password.", true);
 
             showMessage("Creating account...");
-
-            const { data, error } = await supabaseClient.auth.signUp({
-                email: email,
-                password: password,
-            });
+            const { error } = await supabaseClient.auth.signUp({ email, password });
 
             if (error) {
                 showMessage(error.message, true);
             } else {
-                // Supabase requires email confirmation by default
                 showMessage("Success! Check your email to confirm your account.");
             }
         });
 
-        // 4. Handle Log In
+        // 5. Handle Log In
         loginBtn.addEventListener('click', async () => {
+            clearMessage();
             const email = emailInput.value;
             const password = passwordInput.value;
 
-            if (!email || !password) {
-                return showMessage("Please enter both email and password.", true);
-            }
+            if (!email || !password) return showMessage("Please enter both email and password.", true);
 
             showMessage("Logging in...");
-
-            const { data, error } = await supabaseClient.auth.signInWithPassword({
-                email: email,
-                password: password,
-            });
+            const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
             if (error) {
                 showMessage(error.message, true);
-            } else {
-                showMessage("Login successful! Welcome back.");
-                console.log("Logged in user data:", data.user);
-                
-                // You could redirect the user here, for example:
-                // window.location.href = "dashboard.html";
             }
+            // If successful, onAuthStateChange automatically fires and changes the UI!
+        });
+
+        // 6. Handle Log Out
+        logoutBtn.addEventListener('click', async () => {
+            const { error } = await supabaseClient.auth.signOut();
+            if (error) {
+                showMessage("Error logging out: " + error.message, true);
+            }
+            // If successful, onAuthStateChange automatically fires and changes the UI!
         });
     </script>
 
