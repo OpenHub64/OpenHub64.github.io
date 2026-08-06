@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
+    <title>Global Chat - OpenHub</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Navbar */
+        .navbar {
+            background-color: #1a1a1a;
+            color: white;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .navbar h1 { margin: 0; font-size: 20px; color: #3ECF8E; }
+        .back-btn {
+            color: white;
+            text-decoration: none;
+            background: #333;
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .back-btn:hover { background: #444; }
+
+        /* Chat Layout */
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+            margin: 0 auto;
+            width: 100%;
+            background: white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.05);
+        }
+
+        /* Messages Area */
+        #messagesBox {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background-color: #ffffff;
+        }
+
+        .message {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            max-width: 80%;
+        }
+        
+        .message.self {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .msg-avatar {
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1px solid #ccc;
+        }
+
+        .msg-content-wrapper {
+            display: flex;
+            flex-direction: column;
+        }
+        .message.self .msg-content-wrapper { align-items: flex-end; }
+
+        .msg-username {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 3px;
+        }
+
+        .msg-bubble {
+            background: #f1f1f1;
+            padding: 10px 15px;
+            border-radius: 15px;
+            border-top-left-radius: 2px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .message.self .msg-bubble {
+            background: #3ECF8E;
+            color: white;
+            border-radius: 15px;
+            border-top-right-radius: 2px;
+            border-top-left-radius: 15px;
+        }
+
+        /* Input Area */
+        .input-area {
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+        }
+        #messageInput {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 25px;
+            outline: none;
+            font-size: 15px;
+        }
+        #sendBtn {
+            background-color: #3ECF8E;
+            color: white;
+            border: none;
+            padding: 0 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #sendBtn:hover { background-color: #2eb87c; }
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+    <nav class="navbar">
+        <h1>💬 OpenHub Global Chat</h1>
+        <a href="index.html" class="back-btn">← Back to Hub</a>
+    </nav>
+
+    <div class="chat-container">
+        <div id="messagesBox">
+            <div style="text-align: center; color: #888; font-size: 14px; padding: 20px;">
+                Loading messages...
+            </div>
+        </div>
+        
+        <form class="input-area" id="chatForm">
+            <input type="text" id="messageInput" placeholder="Type a message..." autocomplete="off" required>
+            <button type="submit" id="sendBtn">Send</button>
+        </form>
+    </div>
+
+    <script>
+        // 1. Configuration
+        const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        let currentUser = null;
+        const messagesBox = document.getElementById('messagesBox');
+        const chatForm = document.getElementById('chatForm');
+        const messageInput = document.getElementById('messageInput');
+
+        // Default avatar if user doesn't have one
+        const DEFAULT_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>";
+
+        // 2. Authentication Check
+        async function checkAuth() {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (!session) {
+                // If they aren't logged in, redirect them back to the login page
+                window.location.href = 'index.html';
+                return;
+            }
+            currentUser = session.user;
+            
+            // Load messages and subscribe to new ones
+            loadMessages();
+            subscribeToRealtime();
+        }
+
+        // 3. UI Helper: Render a single message
+        function renderMessage(msgData) {
+            // Check if this message was sent by the current user
+            const isSelf = msgData.profile_id === currentUser.id;
+            
+            // Safely get profile info (fallback if missing)
+            const username = msgData.profiles?.username || "Unknown User";
+            const avatar = msgData.profiles?.avatar_base64 || DEFAULT_AVATAR;
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${isSelf ? 'self' : ''}`;
+            
+            msgDiv.innerHTML = `
+                <img class="msg-avatar" src="${avatar}" alt="Avatar">
+                <div class="msg-content-wrapper">
+                    <div class="msg-username">${username}</div>
+                    <div class="msg-bubble">${escapeHTML(msgData.content)}</div>
+                </div>
+            `;
+            
+            messagesBox.appendChild(msgDiv);
+            scrollToBottom();
+        }
+
+        // Helper to prevent XSS attacks (people sending malicious code in chat)
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g, 
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag] || tag)
+            );
+        }
+
+        function scrollToBottom() {
+            messagesBox.scrollTop = messagesBox.scrollHeight;
+        }
+
+        // 4. Load initial messages
+        async function loadMessages() {
+            // Fetch last 50 messages, joining the profiles table to get usernames and avatars
+            const { data, error } = await supabaseClient
+                .from('messages')
+                .select(`
+                    id, 
+                    content, 
+                    profile_id, 
+                    created_at,
+                    profiles (username, avatar_base64)
+                `)
+                .order('created_at', { ascending: false })
+                .limit(50);
+
+            if (error) {
+                messagesBox.innerHTML = `<div style="color:red; text-align:center;">Error loading messages: ${error.message}</div>`;
+                return;
+            }
+
+            messagesBox.innerHTML = ''; // Clear loading text
+            
+            // Since we fetched descending (newest first) to get the latest 50, we need to reverse them to display oldest to newest top-to-bottom
+            data.reverse().forEach(renderMessage);
+        }
+
+        // 5. Send a new message
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const text = messageInput.value.trim();
+            if (!text) return;
+
+            // Clear input immediately for better UX
+            messageInput.value = '';
+
+            const { error } = await supabaseClient
+                .from('messages')
+                .insert([{ profile_id: currentUser.id, content: text }]);
+
+            if (error) {
+                alert("Error sending message: " + error.message);
+            }
+        });
+
+        // 6. Listen for new messages in Realtime
+        function subscribeToRealtime() {
+            supabaseClient
+                .channel('public:messages')
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
+                    // Because real-time payloads don't automatically join relational tables, 
+                    // we need to quickly fetch the profile info for the new message.
+                    const { data: profileData } = await supabaseClient
+                        .from('profiles')
+                        .select('username, avatar_base64')
+                        .eq('id', payload.new.profile_id)
+                        .single();
+
+                    // Combine the raw message with the profile data
+                    const fullMessage = {
+                        ...payload.new,
+                        profiles: profileData
+                    };
+
+                    renderMessage(fullMessage);
+                })
+                .subscribe();
+        }
+
+        // Boot up
+        checkAuth();
+    </script>
+</body>
+</html>
