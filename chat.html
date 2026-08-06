@@ -1,406 +1,257 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="data:,">
-    <title>OpenHub Discord Chat</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0; padding: 0;
-            background-color: #313338;
-            color: #dbdee1;
-            display: flex;
-            height: 100vh;
-            overflow: hidden;
-        }
+// 1. Configuration
+const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        /* 1. Server Rail (Far Left) */
-        .server-rail {
-            width: 72px;
-            background-color: #1e1f22;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 12px 0;
-            gap: 8px;
-        }
-        .rail-btn {
-            width: 48px; height: 48px;
-            border-radius: 50%;
-            background: #313338;
-            color: #23a55a;
-            display: flex; align-items: center; justify-content: center;
-            font-weight: bold; font-size: 18px;
-            cursor: pointer;
-            transition: border-radius 0.2s, background-color 0.2s;
-            text-decoration: none;
-        }
-        .rail-btn:hover { border-radius: 16px; background: #23a55a; color: white; }
-        .rail-btn.active { border-radius: 16px; background: #5865f2; color: white; }
-        .rail-divider { width: 32px; height: 2px; background: #35363c; margin: 4px 0; }
+let currentUser = null;
+let activeMode = 'DM'; // 'DM' or 'SERVER'
+let activeTargetId = null; // Receiver User ID (for DM) or Channel ID (for Server)
+let activeServerId = null;
 
-        /* 2. Channel & DM Sidebar (Left Middle) */
-        .sidebar {
-            width: 240px;
-            background-color: #2b2d31;
-            display: flex;
-            flex-direction: column;
-        }
-        .sidebar-header {
-            height: 48px;
-            border-bottom: 1px solid #1f2023;
-            padding: 0 16px;
-            display: flex; align-items: center; justify-content: space-between;
-            font-weight: bold; font-size: 15px; color: #f2f3f5;
-        }
-        .sidebar-section { padding: 12px 8px; flex: 1; overflow-y: auto; }
-        .section-title {
-            font-size: 12px; font-weight: bold; color: #949ba4;
-            text-transform: uppercase; margin: 12px 8px 6px;
-            display: flex; justify-content: space-between; align-items: center;
-        }
-        .item-btn {
-            display: flex; align-items: center; gap: 8px;
-            padding: 8px; border-radius: 4px;
-            color: #949ba4; cursor: pointer; text-decoration: none;
-            font-size: 14px; margin-bottom: 2px;
-        }
-        .item-btn:hover { background-color: #35373c; color: #dbdee1; }
-        .item-btn.active { background-color: #404249; color: white; }
+const DEFAULT_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>";
 
-        /* 3. Main Chat View (Right) */
-        .chat-view {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            background-color: #313338;
-        }
-        .chat-header {
-            height: 48px;
-            border-bottom: 1px solid #232428;
-            padding: 0 16px;
-            display: flex; align-items: center; justify-content: space-between;
-            font-weight: bold;
-        }
-        .messages-box {
-            flex: 1; padding: 16px;
-            overflow-y: auto;
-            display: flex; flex-direction: column; gap: 12px;
-        }
-        .message { display: flex; gap: 12px; align-items: flex-start; }
-        .msg-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
-        .msg-username { font-weight: bold; font-size: 14px; color: #f2f3f5; margin-right: 8px; }
-        .msg-time { font-size: 11px; color: #949ba4; }
-        .msg-text { margin-top: 4px; font-size: 14px; line-height: 1.4; color: #dbdee1; }
+// 2. Auth Check
+async function checkAuth() {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) {
+        window.location.href = 'index.html';
+        return;
+    }
+    currentUser = session.user;
+    loadServers();
+    showDMView();
+    listenRealtime();
+}
 
-        /* Input Bar */
-        .input-bar { padding: 0 16px 20px; }
-        .input-wrapper {
-            background-color: #383a40;
-            border-radius: 8px;
-            display: flex; padding: 10px 16px;
-        }
-        #messageInput {
-            background: transparent; border: none; outline: none;
-            color: #dbdee1; width: 100%; font-size: 14px;
-        }
+// 3. Load Servers
+async function loadServers() {
+    const { data: servers } = await supabaseClient.from('servers').select('*');
+    const container = document.getElementById('serversList');
+    container.innerHTML = '';
 
-        /* Modal Dialog */
-        .modal-overlay {
-            display: none; position: fixed; inset: 0;
-            background: rgba(0,0,0,0.7);
-            align-items: center; justify-content: center; z-index: 100;
-        }
-        .modal {
-            background: #313338; padding: 24px;
-            border-radius: 8px; width: 380px; color: white;
-        }
-        .modal input[type="text"] {
-            width: 100%; padding: 10px; margin: 10px 0;
-            background: #1e1f22; border: 1px solid #2b2d31;
-            color: white; border-radius: 4px; outline: none;
-        }
-        .modal-btn {
-            background: #5865f2; color: white; border: none;
-            padding: 10px 16px; border-radius: 4px; cursor: pointer;
-            width: 100%; font-weight: bold; margin-top: 10px;
-        }
-    </style>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-</head>
-<body>
+    if (servers) {
+        servers.forEach(srv => {
+            const btn = document.createElement('div');
+            btn.className = `rail-btn ${activeServerId === srv.id ? 'active' : ''}`;
+            btn.textContent = srv.name.substring(0, 2).toUpperCase();
+            btn.title = srv.name;
+            btn.onclick = () => selectServer(srv);
+            container.appendChild(btn);
+        });
+    }
+}
 
-    <div class="server-rail">
-        <a href="index.html" class="rail-btn" title="Back to Hub">🏠</a>
-        <div class="rail-btn active" id="btnDirectMessages" onclick="showDMView()">💬</div>
-        <div class="rail-divider"></div>
-        <div id="serversList"></div>
-        <div class="rail-btn" onclick="openCreateServerModal()">+</div>
-    </div>
+// 4. Show Direct Messages List
+async function showDMView() {
+    activeMode = 'DM';
+    activeServerId = null;
+    activeTargetId = null;
+    document.getElementById('sidebarHeader').textContent = 'Direct Messages';
+    document.getElementById('sectionLabel').textContent = 'Friends / Users';
+    document.getElementById('addChannelBtn').style.display = 'none';
+    document.getElementById('chatHeader').textContent = 'Select a friend to DM';
+    document.getElementById('messagesBox').innerHTML = '<div style="text-align:center; color:#949ba4; margin-top:20px;">Select a conversation to start chatting.</div>';
 
-    <div class="sidebar">
-        <div class="sidebar-header" id="sidebarHeader">Direct Messages</div>
-        <div class="sidebar-section">
-            <div class="section-title">
-                <span id="sectionLabel">Direct Messages</span>
-                <span style="cursor:pointer;" id="addChannelBtn" onclick="promptNewChannel()">+</span>
-            </div>
-            <div id="sidebarList"></div>
-        </div>
-    </div>
+    const { data: users } = await supabaseClient.from('profiles').select('*').neq('id', currentUser.id);
+    const container = document.getElementById('sidebarList');
+    container.innerHTML = '';
 
-    <div class="chat-view">
-        <div class="chat-header" id="chatHeader">Select a conversation</div>
-        <div class="messages-box" id="messagesBox">
-            <div style="text-align:center; color:#949ba4; margin-top:20px;">
-                Welcome! Select a DM or server channel to start chatting.
-            </div>
-        </div>
-        <div class="input-bar">
-            <form class="input-wrapper" id="chatForm">
-                <input type="text" id="messageInput" placeholder="Message..." autocomplete="off">
-            </form>
-        </div>
-    </div>
+    if (users) {
+        users.forEach(u => {
+            const div = document.createElement('div');
+            div.className = `item-btn ${activeTargetId === u.id ? 'active' : ''}`;
+            div.innerHTML = `<span>👤</span> ${escapeHTML(u.username || 'User')}`;
+            div.onclick = () => selectDM(u);
+            container.appendChild(div);
+        });
+    }
+    loadServers();
+}
 
-    <div class="modal-overlay" id="serverModal">
-        <div class="modal">
-            <h3 style="margin-top:0;">Create a Server</h3>
-            <label>Server Name</label>
-            <input type="text" id="newServerName" placeholder="My Awesome Server">
-            <label><input type="checkbox" id="newServerPrivate"> Private Server</label>
-            <button class="modal-btn" onclick="createNewServer()">Create</button>
-            <button class="modal-btn" style="background:#4e5058; margin-top:6px;" onclick="closeServerModal()">Cancel</button>
-        </div>
-    </div>
+function selectDM(user) {
+    activeTargetId = user.id;
+    document.getElementById('chatHeader').textContent = `@ ${user.username}`;
+    
+    // Highlight selected user
+    document.querySelectorAll('#sidebarList .item-btn').forEach(btn => btn.classList.remove('active'));
+    event.currentTarget.classList.add('active');
 
-    <script>
-        // 1. Configuration
-        const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
-        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    loadDMMessages();
+}
 
-        let currentUser = null;
-        let activeMode = 'DM'; // 'DM' or 'SERVER'
-        let activeTargetId = null; // DM Target User ID or Channel ID
-        let activeServerId = null;
+// 5. Select Server
+async function selectServer(server) {
+    activeMode = 'SERVER';
+    activeServerId = server.id;
+    activeTargetId = null;
+    document.getElementById('sidebarHeader').textContent = server.name;
+    document.getElementById('sectionLabel').textContent = 'Channels';
+    document.getElementById('addChannelBtn').style.display = 'inline';
+    document.getElementById('chatHeader').textContent = 'Select a channel';
+    document.getElementById('messagesBox').innerHTML = '<div style="text-align:center; color:#949ba4; margin-top:20px;">Select a channel to view messages.</div>';
 
-        const DEFAULT_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>";
+    const { data: channels } = await supabaseClient.from('channels').select('*').eq('server_id', server.id);
+    const container = document.getElementById('sidebarList');
+    container.innerHTML = '';
 
-        // 2. Auth Check
-        async function checkAuth() {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (!session) {
-                window.location.href = 'index.html';
-                return;
-            }
-            currentUser = session.user;
-            loadServers();
-            showDMView();
-            listenRealtime();
-        }
+    if (channels && channels.length > 0) {
+        channels.forEach((ch, index) => {
+            const div = document.createElement('div');
+            div.className = `item-btn`;
+            div.innerHTML = `<span>#</span> ${escapeHTML(ch.name)}`;
+            div.onclick = (e) => {
+                document.querySelectorAll('#sidebarList .item-btn').forEach(b => b.classList.remove('active'));
+                div.classList.add('active');
+                selectChannel(ch);
+            };
+            container.appendChild(div);
 
-        // 3. Load Servers
-        async function loadServers() {
-            const { data: servers } = await supabaseClient.from('servers').select('*');
-            const container = document.getElementById('serversList');
-            container.innerHTML = '';
-
-            if (servers) {
-                servers.forEach(srv => {
-                    const btn = document.createElement('div');
-                    btn.className = `rail-btn ${activeServerId === srv.id ? 'active' : ''}`;
-                    btn.textContent = srv.name.substring(0, 2).toUpperCase();
-                    btn.title = srv.name;
-                    btn.onclick = () => selectServer(srv);
-                    container.appendChild(btn);
-                });
-            }
-        }
-
-        // 4. Show Direct Messages List
-        async function showDMView() {
-            activeMode = 'DM';
-            activeServerId = null;
-            document.getElementById('sidebarHeader').textContent = 'Direct Messages';
-            document.getElementById('sectionLabel').textContent = 'Friends / Users';
-            document.getElementById('addChannelBtn').style.display = 'none';
-
-            const { data: users } = await supabaseClient.from('profiles').select('*').neq('id', currentUser.id);
-            const container = document.getElementById('sidebarList');
-            container.innerHTML = '';
-
-            if (users) {
-                users.forEach(u => {
-                    const div = document.createElement('div');
-                    div.className = `item-btn ${activeTargetId === u.id ? 'active' : ''}`;
-                    div.innerHTML = `<span>👤</span> ${escapeHTML(u.username || 'User')}`;
-                    div.onclick = () => selectDM(u);
-                    container.appendChild(div);
-                });
-            }
-            loadServers();
-        }
-
-        function selectDM(user) {
-            activeTargetId = user.id;
-            document.getElementById('chatHeader').textContent = `@ ${user.username}`;
-            showDMView();
-            loadDMMessages();
-        }
-
-        // 5. Select Server
-        async function selectServer(server) {
-            activeMode = 'SERVER';
-            activeServerId = server.id;
-            document.getElementById('sidebarHeader').textContent = server.name;
-            document.getElementById('sectionLabel').textContent = 'Channels';
-            document.getElementById('addChannelBtn').style.display = 'inline';
-
-            const { data: channels } = await supabaseClient.from('channels').select('*').eq('server_id', server.id);
-            const container = document.getElementById('sidebarList');
-            container.innerHTML = '';
-
-            if (channels && channels.length > 0) {
-                channels.forEach(ch => {
-                    const div = document.createElement('div');
-                    div.className = `item-btn ${activeTargetId === ch.id ? 'active' : ''}`;
-                    div.innerHTML = `<span>#</span> ${escapeHTML(ch.name)}`;
-                    div.onclick = () => selectChannel(ch);
-                    container.appendChild(div);
-                });
-            } else {
-                container.innerHTML = '<div style="font-size:12px; color:#949ba4; padding:8px;">No channels yet.</div>';
-            }
-            loadServers();
-        }
-
-        function selectChannel(ch) {
-            activeTargetId = ch.id;
-            document.getElementById('chatHeader').textContent = `# ${ch.name}`;
-            loadChannelMessages();
-        }
-
-        // 6. Load Messages
-        async function loadDMMessages() {
-            const { data } = await supabaseClient.from('direct_messages')
-                .select('*, profiles:sender_id(username, avatar_base64)')
-                .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${activeTargetId}),and(sender_id.eq.${activeTargetId},receiver_id.eq.${currentUser.id})`)
-                .order('created_at', { ascending: true });
-
-            renderMessages(data || []);
-        }
-
-        async function loadChannelMessages() {
-            const { data } = await supabaseClient.from('messages')
-                .select('*, profiles:profile_id(username, avatar_base64)')
-                .order('created_at', { ascending: true });
-
-            renderMessages(data || []);
-        }
-
-        function renderMessages(msgs) {
-            const box = document.getElementById('messagesBox');
-            box.innerHTML = '';
-            msgs.forEach(m => {
-                const username = m.profiles?.username || 'User';
-                const avatar = m.profiles?.avatar_base64 || DEFAULT_AVATAR;
-                const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                const div = document.createElement('div');
-                div.className = 'message';
-                div.innerHTML = `
-                    <img class="msg-avatar" src="${avatar}">
-                    <div>
-                        <div>
-                            <span class="msg-username">${escapeHTML(username)}</span>
-                            <span class="msg-time">${time}</span>
-                        </div>
-                        <div class="msg-text">${escapeHTML(m.content)}</div>
-                    </div>
-                `;
-                box.appendChild(div);
-            });
-            box.scrollTop = box.scrollHeight;
-        }
-
-        // 7. Send Message
-        document.getElementById('chatForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const input = document.getElementById('messageInput');
-            const text = input.value.trim();
-            if (!text || !activeTargetId) return;
-
-            input.value = '';
-
-            if (activeMode === 'DM') {
-                await supabaseClient.from('direct_messages').insert([{
-                    sender_id: currentUser.id,
-                    receiver_id: activeTargetId,
-                    content: text
-                }]);
-                loadDMMessages();
-            } else {
-                await supabaseClient.from('messages').insert([{
-                    profile_id: currentUser.id,
-                    content: text
-                }]);
-                loadChannelMessages();
+            // Auto-select the first channel
+            if (index === 0) {
+                div.classList.add('active');
+                selectChannel(ch);
             }
         });
+    } else {
+        container.innerHTML = '<div style="font-size:12px; color:#949ba4; padding:8px;">No channels yet.</div>';
+    }
+    loadServers();
+}
 
-        // 8. Server & Channel Creation Modals
-        function openCreateServerModal() { document.getElementById('serverModal').style.display = 'flex'; }
-        function closeServerModal() { document.getElementById('serverModal').style.display = 'none'; }
+function selectChannel(ch) {
+    activeTargetId = ch.id;
+    document.getElementById('chatHeader').textContent = `# ${ch.name}`;
+    loadChannelMessages();
+}
 
-        async function createNewServer() {
-            const name = document.getElementById('newServerName').value.trim();
-            const isPrivate = document.getElementById('newServerPrivate').checked;
-            if (!name) return;
+// 6. Load Messages (With Proper Filtering!)
+async function loadDMMessages() {
+    if (!activeTargetId) return;
 
-            const { data: srv } = await supabaseClient.from('servers').insert([{
-                name, is_private: isPrivate, owner_id: currentUser.id
-            }]).select().single();
+    const { data, error } = await supabaseClient.from('direct_messages')
+        .select('*, profiles:sender_id(username, avatar_base64)')
+        .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${activeTargetId}),and(sender_id.eq.${activeTargetId},receiver_id.eq.${currentUser.id})`)
+        .order('created_at', { ascending: true });
 
-            if (srv) {
-                await supabaseClient.from('channels').insert([{ server_id: srv.id, name: 'general' }]);
-                closeServerModal();
-                loadServers();
-                selectServer(srv);
-            }
-        }
+    if (error) console.error("DM Load Error:", error);
+    renderMessages(data || []);
+}
 
-        async function promptNewChannel() {
-            if (!activeServerId) return;
-            const name = prompt('Enter channel name:');
-            if (!name) return;
+async function loadChannelMessages() {
+    if (!activeTargetId) return;
 
-            await supabaseClient.from('channels').insert([{ server_id: activeServerId, name: name.toLowerCase().replace(/\s+/g, '-') }]);
-            const { data: srv } = await supabaseClient.from('servers').select('*').eq('id', activeServerId).single();
-            if (srv) selectServer(srv);
-        }
+    const { data, error } = await supabaseClient.from('messages')
+        .select('*, profiles:profile_id(username, avatar_base64)')
+        .eq('channel_id', activeTargetId) // Filter by specific channel ID!
+        .order('created_at', { ascending: true });
 
-        function listenRealtime() {
-            supabaseClient.channel('realtime_chats')
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_messages' }, () => {
-                    if (activeMode === 'DM') loadDMMessages();
-                })
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
-                    if (activeMode === 'SERVER') loadChannelMessages();
-                })
-                .subscribe();
-        }
+    if (error) console.error("Channel Load Error:", error);
+    renderMessages(data || []);
+}
 
-        function escapeHTML(str) {
-            return str.replace(/[&<>'"]/g, tag => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
-            }[tag] || tag));
-        }
+function renderMessages(msgs) {
+    const box = document.getElementById('messagesBox');
+    box.innerHTML = '';
 
-        checkAuth();
-    </script>
-</body>
-</html>
+    if (msgs.length === 0) {
+        box.innerHTML = '<div style="text-align:center; color:#949ba4; margin-top:20px;">No messages here yet. Say hi!</div>';
+        return;
+    }
+
+    msgs.forEach(m => {
+        const username = m.profiles?.username || 'User';
+        const avatar = m.profiles?.avatar_base64 || DEFAULT_AVATAR;
+        const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        const div = document.createElement('div');
+        div.className = 'message';
+        div.innerHTML = `
+            <img class="msg-avatar" src="${avatar}">
+            <div>
+                <div>
+                    <span class="msg-username">${escapeHTML(username)}</span>
+                    <span class="msg-time">${time}</span>
+                </div>
+                <div class="msg-text">${escapeHTML(m.content)}</div>
+            </div>
+        `;
+        box.appendChild(div);
+    });
+    box.scrollTop = box.scrollHeight;
+}
+
+// 7. Send Message
+document.getElementById('chatForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('messageInput');
+    const text = input.value.trim();
+    if (!text || !activeTargetId) return;
+
+    input.value = '';
+
+    if (activeMode === 'DM') {
+        const { error } = await supabaseClient.from('direct_messages').insert([{
+            sender_id: currentUser.id,
+            receiver_id: activeTargetId,
+            content: text
+        }]);
+        if (!error) loadDMMessages();
+    } else {
+        const { error } = await supabaseClient.from('messages').insert([{
+            profile_id: currentUser.id,
+            channel_id: activeTargetId, // Attach message to active channel!
+            content: text
+        }]);
+        if (!error) loadChannelMessages();
+    }
+});
+
+// 8. Server & Channel Creation Modals
+function openCreateServerModal() { document.getElementById('serverModal').style.display = 'flex'; }
+function closeServerModal() { document.getElementById('serverModal').style.display = 'none'; }
+
+async function createNewServer() {
+    const name = document.getElementById('newServerName').value.trim();
+    const isPrivate = document.getElementById('newServerPrivate').checked;
+    if (!name) return;
+
+    const { data: srv } = await supabaseClient.from('servers').insert([{
+        name, is_private: isPrivate, owner_id: currentUser.id
+    }]).select().single();
+
+    if (srv) {
+        await supabaseClient.from('channels').insert([{ server_id: srv.id, name: 'general' }]);
+        closeServerModal();
+        loadServers();
+        selectServer(srv);
+    }
+}
+
+async function promptNewChannel() {
+    if (!activeServerId) return;
+    const name = prompt('Enter channel name:');
+    if (!name) return;
+
+    await supabaseClient.from('channels').insert([{ server_id: activeServerId, name: name.toLowerCase().replace(/\s+/g, '-') }]);
+    const { data: srv } = await supabaseClient.from('servers').select('*').eq('id', activeServerId).single();
+    if (srv) selectServer(srv);
+}
+
+function listenRealtime() {
+    supabaseClient.channel('realtime_chats')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_messages' }, () => {
+            if (activeMode === 'DM') loadDMMessages();
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+            if (activeMode === 'SERVER') loadChannelMessages();
+        })
+        .subscribe();
+}
+
+function escapeHTML(str) {
+    return str.replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[tag] || tag));
+}
+
+checkAuth();
