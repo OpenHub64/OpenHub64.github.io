@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Supabase App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f4f4f9;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #3ECF8E; /* Supabase Green */
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #2eb87c;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 4px;
+            min-height: 50px;
+        }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Welcome to openhub64</h2>
+        <p>This page is communicating with your Supabase backend.</p>
+        
+        <button id="testBtn">Test Connection</button>
+        
+        <div id="output">Results will appear here...</div>
+    </div>
+
+    <script>
+        // 1. Initialize Supabase with your project details
+        const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
+        
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // 2. Select HTML elements
+        const testBtn = document.getElementById('testBtn');
+        const outputDiv = document.getElementById('output');
+
+        // 3. Add an event listener to the button
+        testBtn.addEventListener('click', async () => {
+            outputDiv.innerHTML = "Connecting to Supabase...";
+            
+            try {
+                // Example: Trying to fetch data from a table named 'test_table'
+                // Note: You must have a table named 'test_table' in your Supabase database for this to return data
+                const { data, error } = await supabase
+                    .from('test_table') // Replace with your actual table name
+                    .select('*')
+                    .limit(5);
+
+                if (error) {
+                    throw error;
+                }
+
+                if (data && data.length > 0) {
+                    outputDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    outputDiv.innerHTML = "Connection successful! But no data found (Make sure you have a table named 'test_table' with data in it).";
+                }
+            } catch (error) {
+                console.error("Supabase Error:", error);
+                outputDiv.innerHTML = `<span style="color: red;">Error: ${error.message}</span><br>Make sure Row Level Security (RLS) policies allow anonymous reads, and that your table exists.`;
+            }
+        });
+    </script>
+
+</body>
+</html>
