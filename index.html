@@ -4,41 +4,74 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,">
-    <title>My Supabase App</title>
+    <title>Login - My Supabase App</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 40px;
             background-color: #f4f4f9;
             color: #333;
+            display: flex;
+            justify-content: center;
         }
         .container {
-            max-width: 600px;
-            margin: 0 auto;
+            width: 100%;
+            max-width: 400px;
             background: white;
-            padding: 20px;
+            padding: 30px;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h2 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box; /* Ensures padding doesn't push width past 100% */
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
         }
         button {
+            flex: 1;
             background-color: #3ECF8E; /* Supabase Green */
             color: white;
             border: none;
-            padding: 10px 15px;
+            padding: 10px;
             border-radius: 5px;
             cursor: pointer;
             font-size: 16px;
         }
-        button:hover {
-            background-color: #2eb87c;
+        button.secondary {
+            background-color: #333;
         }
-        #output {
+        button:hover {
+            opacity: 0.9;
+        }
+        #message {
             margin-top: 20px;
             padding: 10px;
-            background: #e9ecef;
             border-radius: 4px;
-            min-height: 50px;
+            text-align: center;
+            display: none; /* Hidden by default */
         }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -46,49 +79,98 @@
 <body>
 
     <div class="container">
-        <h2>Welcome to openhub64</h2>
-        <p>This page is communicating with your Supabase backend.</p>
+        <h2>Welcome Back</h2>
         
-        <button id="testBtn">Test Connection</button>
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="you@example.com" required>
+        </div>
         
-        <div id="output">Results will appear here...</div>
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" placeholder="••••••••" required>
+        </div>
+
+        <div class="button-group">
+            <button id="loginBtn">Log In</button>
+            <button id="signupBtn" class="secondary">Sign Up</button>
+        </div>
+        
+        <div id="message"></div>
     </div>
 
     <script>
-        // 1. Initialize Supabase with your project details
+        // 1. Initialize Supabase
         const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
-        
-        // FIX: Changed variable name to 'supabaseClient' so it doesn't conflict with the global 'supabase' object
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         // 2. Select HTML elements
-        const testBtn = document.getElementById('testBtn');
-        const outputDiv = document.getElementById('output');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const loginBtn = document.getElementById('loginBtn');
+        const signupBtn = document.getElementById('signupBtn');
+        const messageDiv = document.getElementById('message');
 
-        // 3. Add an event listener to the button
-        testBtn.addEventListener('click', async () => {
-            outputDiv.innerHTML = "Connecting to Supabase...";
-            
-            try {
-                // Example: Trying to fetch data from a table named 'test_table'
-                const { data, error } = await supabaseClient // FIX: Updated variable name here too
-                    .from('test_table') 
-                    .select('*')
-                    .limit(5);
+        // Helper function to show messages
+        function showMessage(text, isError = false) {
+            messageDiv.style.display = 'block';
+            messageDiv.textContent = text;
+            if (isError) {
+                messageDiv.className = 'error';
+            } else {
+                messageDiv.className = 'success';
+            }
+        }
 
-                if (error) {
-                    throw error;
-                }
+        // 3. Handle Sign Up
+        signupBtn.addEventListener('click', async () => {
+            const email = emailInput.value;
+            const password = passwordInput.value;
 
-                if (data && data.length > 0) {
-                    outputDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
-                } else {
-                    outputDiv.innerHTML = "Connection successful! But no data found (Make sure you have a table named 'test_table' with data in it).";
-                }
-            } catch (error) {
-                console.error("Supabase Error:", error);
-                outputDiv.innerHTML = `<span style="color: red;">Error: ${error.message}</span><br>Make sure Row Level Security (RLS) policies allow anonymous reads, and that your table exists.`;
+            if (!email || !password) {
+                return showMessage("Please enter both email and password.", true);
+            }
+
+            showMessage("Creating account...");
+
+            const { data, error } = await supabaseClient.auth.signUp({
+                email: email,
+                password: password,
+            });
+
+            if (error) {
+                showMessage(error.message, true);
+            } else {
+                // Supabase requires email confirmation by default
+                showMessage("Success! Check your email to confirm your account.");
+            }
+        });
+
+        // 4. Handle Log In
+        loginBtn.addEventListener('click', async () => {
+            const email = emailInput.value;
+            const password = passwordInput.value;
+
+            if (!email || !password) {
+                return showMessage("Please enter both email and password.", true);
+            }
+
+            showMessage("Logging in...");
+
+            const { data, error } = await supabaseClient.auth.signInWithPassword({
+                email: email,
+                password: password,
+            });
+
+            if (error) {
+                showMessage(error.message, true);
+            } else {
+                showMessage("Login successful! Welcome back.");
+                console.log("Logged in user data:", data.user);
+                
+                // You could redirect the user here, for example:
+                // window.location.href = "dashboard.html";
             }
         });
     </script>
