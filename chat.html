@@ -164,7 +164,7 @@
         const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
         
-        // FIX: Variable renamed to supabaseClient to prevent collision with window.supabase
+        // Use supabaseClient to prevent collision with window.supabase
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         let currentUser = null;
@@ -179,7 +179,7 @@
         async function checkAuth() {
             const { data: { session } } = await supabaseClient.auth.getSession();
             if (!session) {
-                // If they aren't logged in, redirect them back to the login page
+                // If not logged in, kick back to index.html
                 window.location.href = 'index.html';
                 return;
             }
@@ -192,10 +192,8 @@
 
         // 3. UI Helper: Render a single message
         function renderMessage(msgData) {
-            // Check if this message was sent by the current user
             const isSelf = msgData.profile_id === currentUser.id;
             
-            // Safely get profile info (fallback if missing)
             const username = msgData.profiles?.username || "Unknown User";
             const avatar = msgData.profiles?.avatar_base64 || DEFAULT_AVATAR;
             
@@ -214,7 +212,6 @@
             scrollToBottom();
         }
 
-        // Helper to prevent XSS attacks (people sending malicious code in chat)
         function escapeHTML(str) {
             return str.replace(/[&<>'"]/g, 
                 tag => ({
@@ -233,7 +230,6 @@
 
         // 4. Load initial messages
         async function loadMessages() {
-            // Fetch last 50 messages, joining the profiles table to get usernames and avatars
             const { data, error } = await supabaseClient
                 .from('messages')
                 .select(`
@@ -251,9 +247,8 @@
                 return;
             }
 
-            messagesBox.innerHTML = ''; // Clear loading text
+            messagesBox.innerHTML = ''; // Clear loading indicator
             
-            // Reverse array so oldest display at top, newest at bottom
             data.reverse().forEach(renderMessage);
         }
 
@@ -263,7 +258,6 @@
             const text = messageInput.value.trim();
             if (!text) return;
 
-            // Clear input immediately for better UX
             messageInput.value = '';
 
             const { error } = await supabaseClient
@@ -280,7 +274,6 @@
             supabaseClient
                 .channel('public:messages')
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
-                    // Fetch profile details for the newly inserted row
                     const { data: profileData } = await supabaseClient
                         .from('profiles')
                         .select('username, avatar_base64')
