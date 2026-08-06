@@ -302,9 +302,9 @@
             loadChannelMessages();
         }
 
-        // 6. Load Messages (With Proper Filtering!)
+        // 6. Load Messages (Guarded)
         async function loadDMMessages() {
-            if (!activeTargetId) return;
+            if (activeMode !== 'DM' || !activeTargetId) return;
 
             const { data, error } = await supabaseClient.from('direct_messages')
                 .select('*, profiles:sender_id(username, avatar_base64)')
@@ -316,7 +316,7 @@
         }
 
         async function loadChannelMessages() {
-            if (!activeTargetId) return;
+            if (activeMode !== 'SERVER' || !activeTargetId) return;
 
             const { data, error } = await supabaseClient.from('messages')
                 .select('*, profiles:profile_id(username, avatar_base64)')
