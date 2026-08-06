@@ -61,8 +61,45 @@
         .dropdown h4 { margin: 0 0 15px 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }
         .dropdown .form-group { margin-bottom: 10px; }
         
+        /* Dashboard Windows Grid */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            padding: 40px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .window-card {
+            background: white;
+            border-radius: 8px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            text-decoration: none; /* Removes the underline from links */
+            color: #333;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        .window-card:hover {
+            transform: translateY(-5px); /* Makes the card float up */
+            box-shadow: 0 8px 15px rgba(0,0,0,0.15);
+        }
+        .window-card h3 {
+            color: #3ECF8E;
+            margin-top: 0;
+            font-size: 22px;
+        }
+        .window-card p {
+            color: #666;
+            margin-bottom: 0;
+            line-height: 1.4;
+        }
+
         /* Sections */
-        #authSection { display: block; } /* Show by default until JS runs */
+        #authSection { display: block; } 
         #setupSection { display: none; }
     </style>
 
@@ -123,9 +160,21 @@
             </div>
         </nav>
         
-        <div style="padding: 40px; text-align: center; color: #888;">
-            <h3>Welcome to the Hub.</h3>
-            <p>Your content goes here.</p>
+        <div class="dashboard-grid">
+            <a href="games.html" class="window-card">
+                <h3>🎮 Games</h3>
+                <p>Play awesome browser games directly from the hub.</p>
+            </a>
+            
+            <a href="tools.html" class="window-card">
+                <h3>🛠️ Tools</h3>
+                <p>Access calculators, notes, and other useful utilities.</p>
+            </a>
+            
+            <a href="chat.html" class="window-card">
+                <h3>💬 Chat</h3>
+                <p>Jump into the global chat and talk with other OpenHub users.</p>
+            </a>
         </div>
     </div>
 
@@ -133,8 +182,6 @@
         // --- 1. CONFIGURATION ---
         const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
-        
-        // FIX: Renamed variable to supabaseClient
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         let currentUser = null;
@@ -145,16 +192,13 @@
         const setupSection = document.getElementById('setupSection');
         const appSection = document.getElementById('appSection');
         
-        // Auth UI
         const emailInput = document.getElementById('email');
         const passwordInput = document.getElementById('password');
         const authMessage = document.getElementById('authMessage');
         
-        // Setup UI
         const newUsernameInput = document.getElementById('newUsername');
         const setupMessage = document.getElementById('setupMessage');
         
-        // App UI
         const navProfileIcon = document.getElementById('navProfileIcon');
         const dropdownMenu = document.getElementById('dropdownMenu');
         const displayUsername = document.getElementById('displayUsername');
@@ -175,7 +219,6 @@
         });
 
         async function checkUserProfile() {
-            // Fetch profile for the logged in user
             const { data, error } = await supabaseClient
                 .from('profiles')
                 .select('*')
@@ -183,7 +226,6 @@
                 .single();
 
             if (data && data.username) {
-                // User has a profile and username -> Go to App
                 userProfile = data;
                 displayUsername.textContent = userProfile.username;
                 updateUsernameInput.value = userProfile.username;
@@ -193,7 +235,6 @@
                 }
                 showSection(appSection);
             } else {
-                // User exists in Auth, but no username set yet -> Go to Setup
                 showSection(setupSection);
             }
         }
@@ -229,26 +270,22 @@
         });
 
         // --- 5. EVENT LISTENERS: PROFILES ---
-        
-        // Save initial username
         document.getElementById('saveUsernameBtn').addEventListener('click', async () => {
             const username = newUsernameInput.value.trim();
             if (!username) return setupMessage.textContent = "Username cannot be empty.";
             
             setupMessage.textContent = "Saving...";
             const { error } = await supabaseClient.from('profiles').upsert({ 
-                id: currentUser.id, 
-                username: username 
+                id: currentUser.id, username: username 
             });
 
             if (error) {
                 setupMessage.textContent = error.message.includes('unique') ? "Username already taken." : error.message;
             } else {
-                await checkUserProfile(); // Reload state
+                await checkUserProfile();
             }
         });
 
-        // Update username from dropdown
         document.getElementById('updateUsernameBtn').addEventListener('click', async () => {
             const newName = updateUsernameInput.value.trim();
             if (!newName) return dropdownMessage.textContent = "Username cannot be empty.";
@@ -257,7 +294,7 @@
             const { error } = await supabaseClient.from('profiles').upsert({ 
                 id: currentUser.id, 
                 username: newName,
-                avatar_base64: userProfile ? userProfile.avatar_base64 : null // keep existing pfp
+                avatar_base64: userProfile ? userProfile.avatar_base64 : null
             });
 
             if (error) {
@@ -265,12 +302,11 @@
             } else {
                 dropdownMessage.textContent = "Updated successfully!";
                 dropdownMessage.style.color = "green";
-                await checkUserProfile(); // refresh UI
+                await checkUserProfile();
                 setTimeout(() => dropdownMessage.textContent = "", 2000);
             }
         });
 
-        // Toggle dropdown visibility
         navProfileIcon.addEventListener('click', () => {
             dropdownMenu.classList.toggle('active');
         });
@@ -287,25 +323,19 @@
             reader.onload = function(e) {
                 const img = new Image();
                 img.onload = async function() {
-                    // Create a canvas to resize the image
                     const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 200; // Small size for profile pics
-                    
-                    // Calculate new dimensions keeping aspect ratio
+                    const MAX_WIDTH = 200;
                     const scaleSize = MAX_WIDTH / img.width;
                     canvas.width = MAX_WIDTH;
                     canvas.height = img.height * scaleSize;
 
-                    // Draw compressed image to canvas
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-                    // Convert to base64 JPEG with 0.8 (80%) quality
                     const base64Jpeg = canvas.toDataURL('image/jpeg', 0.8);
 
                     dropdownMessage.textContent = "Saving to database...";
 
-                    // Save to Supabase
                     const { error } = await supabaseClient.from('profiles').upsert({ 
                         id: currentUser.id, 
                         username: userProfile.username,
@@ -318,7 +348,7 @@
                     } else {
                         dropdownMessage.textContent = "Profile picture updated!";
                         dropdownMessage.style.color = "green";
-                        await checkUserProfile(); // Refresh the icon in the navbar
+                        await checkUserProfile();
                         setTimeout(() => dropdownMessage.textContent = "", 2000);
                     }
                 }
