@@ -35,12 +35,6 @@
         }
         button.secondary { background-color: #333; }
         button:hover { opacity: 0.9; }
-        
-        #message {
-            margin-top: 20px; padding: 10px; border-radius: 4px; text-align: center; display: none;
-        }
-        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
 
         /* App Layout (Navbar) */
         #appSection { display: none; }
@@ -66,7 +60,7 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 20px;
-            padding: 40px;
+            padding: 40px 20px 20px 20px;
             max-width: 1000px;
             margin: 0 auto;
         }
@@ -75,7 +69,7 @@
             border-radius: 8px;
             padding: 25px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            text-decoration: none; /* Removes the underline from links */
+            text-decoration: none;
             color: #333;
             transition: transform 0.2s, box-shadow 0.2s;
             display: flex;
@@ -84,21 +78,45 @@
             text-align: center;
         }
         .window-card:hover {
-            transform: translateY(-5px); /* Makes the card float up */
+            transform: translateY(-5px);
             box-shadow: 0 8px 15px rgba(0,0,0,0.15);
         }
-        .window-card h3 {
-            color: #3ECF8E;
-            margin-top: 0;
-            font-size: 22px;
-        }
-        .window-card p {
-            color: #666;
-            margin-bottom: 0;
-            line-height: 1.4;
-        }
+        .window-card h3 { color: #3ECF8E; margin-top: 0; font-size: 22px; }
+        .window-card p { color: #666; margin-bottom: 0; line-height: 1.4; }
 
-        /* Sections */
+        /* Friends Section Styles */
+        .friends-section {
+            max-width: 1000px;
+            margin: 0 auto 40px auto;
+            padding: 0 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .friends-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .friends-card h3 { margin-top: 0; color: #1a1a1a; font-size: 18px; border-bottom: 2px solid #3ECF8E; padding-bottom: 8px; }
+        
+        .search-box { display: flex; gap: 8px; margin-bottom: 15px; }
+        .search-box input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .search-box button { flex: none; padding: 8px 15px; }
+
+        .user-list { list-style: none; padding: 0; margin: 0; max-height: 200px; overflow-y: auto; }
+        .user-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .user-item-info { display: flex; align-items: center; gap: 10px; }
+        .user-item-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; }
+        .user-item button { padding: 5px 10px; font-size: 12px; }
+
         #authSection { display: block; } 
         #setupSection { display: none; }
     </style>
@@ -165,16 +183,30 @@
                 <h3>🎮 Games</h3>
                 <p>Play awesome browser games directly from the hub.</p>
             </a>
-            
             <a href="tools.html" class="window-card">
                 <h3>🛠️ Tools</h3>
                 <p>Access calculators, notes, and other useful utilities.</p>
             </a>
-            
             <a href="chat.html" class="window-card">
                 <h3>💬 Chat</h3>
                 <p>Jump into the global chat and talk with other OpenHub users.</p>
             </a>
+        </div>
+
+        <div class="friends-section">
+            <div class="friends-card">
+                <h3>🔍 Find Friends</h3>
+                <div class="search-box">
+                    <input type="text" id="searchUserInput" placeholder="Search username...">
+                    <button id="searchUserBtn">Search</button>
+                </div>
+                <ul id="searchResultsList" class="user-list"></ul>
+            </div>
+
+            <div class="friends-card">
+                <h3>👥 My Friends</h3>
+                <ul id="friendsList" class="user-list"></ul>
+            </div>
         </div>
     </div>
 
@@ -186,6 +218,7 @@
 
         let currentUser = null;
         let userProfile = null;
+        const DEFAULT_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>";
 
         // --- 2. HTML ELEMENTS ---
         const authSection = document.getElementById('authSection');
@@ -205,6 +238,11 @@
         const updateUsernameInput = document.getElementById('updateUsernameInput');
         const pfpUpload = document.getElementById('pfpUpload');
         const dropdownMessage = document.getElementById('dropdownMessage');
+
+        const searchUserInput = document.getElementById('searchUserInput');
+        const searchUserBtn = document.getElementById('searchUserBtn');
+        const searchResultsList = document.getElementById('searchResultsList');
+        const friendsList = document.getElementById('friendsList');
 
         // --- 3. CORE LOGIC: AUTH STATE CHANGE ---
         supabaseClient.auth.onAuthStateChange(async (event, session) => {
@@ -234,6 +272,7 @@
                     navProfileIcon.src = userProfile.avatar_base64;
                 }
                 showSection(appSection);
+                loadFriends();
             } else {
                 showSection(setupSection);
             }
@@ -269,7 +308,7 @@
             dropdownMenu.classList.remove('active');
         });
 
-        // --- 5. EVENT LISTENERS: PROFILES ---
+        // --- 5. PROFILE UPDATES ---
         document.getElementById('saveUsernameBtn').addEventListener('click', async () => {
             const username = newUsernameInput.value.trim();
             if (!username) return setupMessage.textContent = "Username cannot be empty.";
@@ -356,6 +395,127 @@
             }
             reader.readAsDataURL(file);
         });
+
+        // --- 7. FRIEND SYSTEM LOGIC ---
+        searchUserBtn.addEventListener('click', async () => {
+            const query = searchUserInput.value.trim();
+            if (!query) return;
+
+            searchResultsList.innerHTML = '<li style="padding:10px; color:#888;">Searching...</li>';
+
+            // Search for usernames matching the search term (case-insensitive)
+            const { data, error } = await supabaseClient
+                .from('profiles')
+                .select('id, username, avatar_base64')
+                .ilike('username', `%${query}%`)
+                .neq('id', currentUser.id)
+                .limit(5);
+
+            searchResultsList.innerHTML = '';
+
+            if (error || !data || data.length === 0) {
+                searchResultsList.innerHTML = '<li style="padding:10px; color:#888;">No users found.</li>';
+                return;
+            }
+
+            data.forEach(user => {
+                const li = document.createElement('li');
+                li.className = 'user-item';
+                li.innerHTML = `
+                    <div class="user-item-info">
+                        <img class="user-item-avatar" src="${user.avatar_base64 || DEFAULT_AVATAR}">
+                        <span>${user.username}</span>
+                    </div>
+                    <button onclick="sendFriendRequest('${user.id}')">Add Friend</button>
+                `;
+                searchResultsList.appendChild(li);
+            });
+        });
+
+        window.sendFriendRequest = async (friendId) => {
+            const { error } = await supabaseClient
+                .from('friendships')
+                .insert([{ user_id: currentUser.id, friend_id: friendId, status: 'pending' }]);
+
+            if (error) {
+                alert(error.message.includes('unique') ? "Request already sent!" : "Error: " + error.message);
+            } else {
+                alert("Friend request sent!");
+                loadFriends();
+            }
+        };
+
+        async function loadFriends() {
+            friendsList.innerHTML = '<li style="padding:10px; color:#888;">Loading...</li>';
+
+            // Fetch all friendships involving the current user
+            const { data, error } = await supabaseClient
+                .from('friendships')
+                .select(`
+                    id,
+                    user_id,
+                    friend_id,
+                    status,
+                    requester:profiles!friendships_user_id_fkey(id, username, avatar_base64),
+                    receiver:profiles!friendships_friend_id_fkey(id, username, avatar_base64)
+                `);
+
+            friendsList.innerHTML = '';
+
+            if (error || !data || data.length === 0) {
+                friendsList.innerHTML = '<li style="padding:10px; color:#888;">No friends yet.</li>';
+                return;
+            }
+
+            data.forEach(rel => {
+                const isRequester = rel.user_id === currentUser.id;
+                const otherUser = isRequester ? rel.receiver : rel.requester;
+
+                const li = document.createElement('li');
+                li.className = 'user-item';
+
+                if (rel.status === 'accepted') {
+                    li.innerHTML = `
+                        <div class="user-item-info">
+                            <img class="user-item-avatar" src="${otherUser.avatar_base64 || DEFAULT_AVATAR}">
+                            <span>${otherUser.username}</span>
+                        </div>
+                        <span style="font-size:12px; color:green;">Friends</span>
+                    `;
+                } else if (isRequester && rel.status === 'pending') {
+                    li.innerHTML = `
+                        <div class="user-item-info">
+                            <img class="user-item-avatar" src="${otherUser.avatar_base64 || DEFAULT_AVATAR}">
+                            <span>${otherUser.username}</span>
+                        </div>
+                        <span style="font-size:12px; color:#888;">Pending...</span>
+                    `;
+                } else if (!isRequester && rel.status === 'pending') {
+                    li.innerHTML = `
+                        <div class="user-item-info">
+                            <img class="user-item-avatar" src="${otherUser.avatar_base64 || DEFAULT_AVATAR}">
+                            <span>${otherUser.username}</span>
+                        </div>
+                        <button onclick="acceptFriendRequest(${rel.id})">Accept</button>
+                    `;
+                }
+
+                friendsList.appendChild(li);
+            });
+        }
+
+        window.acceptFriendRequest = async (relationshipId) => {
+            const { error } = await supabaseClient
+                .from('friendships')
+                .update({ status: 'accepted' })
+                .eq('id', relationshipId);
+
+            if (error) {
+                alert("Error accepting request: " + error.message);
+            } else {
+                loadFriends();
+            }
+        };
     </script>
 </body>
 </html>
