@@ -4,212 +4,326 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,">
-    <title>Login - My Supabase App</title>
+    <title>OpenHub</title>
     <style>
+        /* Global Styles */
         body {
             font-family: Arial, sans-serif;
-            margin: 40px;
+            margin: 0;
+            padding: 0;
             background-color: #f4f4f9;
             color: #333;
-            display: flex;
-            justify-content: center;
         }
+
+        /* Reusable UI */
         .container {
-            width: 100%;
             max-width: 400px;
+            margin: 60px auto;
             background: white;
             padding: 30px;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-        h2 {
-            text-align: center;
-            margin-bottom: 20px;
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="email"], input[type="password"] {
+            width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;
         }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        input[type="email"],
-        input[type="password"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
+        .button-group { display: flex; gap: 10px; margin-top: 20px; }
         button {
-            flex: 1;
-            background-color: #3ECF8E; 
-            color: white;
-            border: none;
-            padding: 10px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
+            flex: 1; background-color: #3ECF8E; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; font-size: 16px;
         }
-        button.secondary {
-            background-color: #333;
-        }
-        button:hover {
-            opacity: 0.9;
-        }
+        button.secondary { background-color: #333; }
+        button:hover { opacity: 0.9; }
+        
         #message {
-            margin-top: 20px;
-            padding: 10px;
-            border-radius: 4px;
-            text-align: center;
-            display: none;
+            margin-top: 20px; padding: 10px; border-radius: 4px; text-align: center; display: none;
         }
         .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+
+        /* App Layout (Navbar) */
+        #appSection { display: none; }
+        .navbar {
+            background-color: #1a1a1a; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center;
+        }
+        .navbar h1 { margin: 0; font-size: 24px; color: #3ECF8E; }
         
-        /* New styles for the logged-in view */
-        #loggedInUI {
-            display: none; /* Hidden by default */
-            text-align: center;
+        /* Profile Dropdown */
+        .profile-menu { position: relative; }
+        .profile-icon {
+            width: 40px; height: 40px; border-radius: 50%; cursor: pointer; object-fit: cover; border: 2px solid #3ECF8E;
         }
-        #loggedInUI h3 {
-            margin-bottom: 20px;
-            color: #3ECF8E;
+        .dropdown {
+            display: none; position: absolute; right: 0; top: 50px; background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 250px; padding: 20px; color: #333; z-index: 100;
         }
+        .dropdown.active { display: block; }
+        .dropdown h4 { margin: 0 0 15px 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        .dropdown .form-group { margin-bottom: 10px; }
+        
+        /* Sections */
+        #authSection { display: block; } /* Show by default until JS runs */
+        #setupSection { display: none; }
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
-    <div class="container">
-        
-        <div id="loggedOutUI">
-            <h2>Welcome Back</h2>
-            
-            <div class="form-group">
-                <label for="email">Email</label>
-                <input type="email" id="email" placeholder="you@example.com" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" placeholder="••••••••" required>
-            </div>
-
-            <div class="button-group">
-                <button id="loginBtn">Log In</button>
-                <button id="signupBtn" class="secondary">Sign Up</button>
-            </div>
+    <div id="authSection" class="container">
+        <h2 style="text-align: center; margin-bottom: 20px;">Welcome to OpenHub</h2>
+        <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="email" placeholder="you@example.com">
         </div>
-
-        <div id="loggedInUI">
-            <h3 id="welcomeText">You are logged in!</h3>
-            <button id="logoutBtn" class="secondary">Log Out</button>
+        <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="password" placeholder="••••••••">
         </div>
-        
-        <div id="message"></div>
+        <div class="button-group">
+            <button id="loginBtn">Log In</button>
+            <button id="signupBtn" class="secondary">Sign Up</button>
+        </div>
+        <div id="authMessage" style="margin-top: 15px; text-align: center; color: red;"></div>
+    </div>
 
+    <div id="setupSection" class="container">
+        <h2 style="text-align: center;">Set Your Username</h2>
+        <p style="text-align: center; font-size: 14px; color: #666;">You need a username before you can enter OpenHub.</p>
+        <div class="form-group">
+            <input type="text" id="newUsername" placeholder="e.g. CoolUser99">
+        </div>
+        <button id="saveUsernameBtn" style="width: 100%;">Save & Continue</button>
+        <div id="setupMessage" style="margin-top: 15px; text-align: center; color: red;"></div>
+    </div>
+
+    <div id="appSection">
+        <nav class="navbar">
+            <h1>OpenHub</h1>
+            <div class="profile-menu">
+                <img id="navProfileIcon" class="profile-icon" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>">
+                
+                <div id="dropdownMenu" class="dropdown">
+                    <h4>Hello, <span id="displayUsername">User</span>!</h4>
+                    
+                    <div class="form-group">
+                        <label>Change Username</label>
+                        <input type="text" id="updateUsernameInput" placeholder="New username">
+                        <button id="updateUsernameBtn" style="margin-top: 5px; width: 100%; font-size: 14px;">Update</button>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label>Change Profile Picture</label>
+                        <input type="file" id="pfpUpload" accept="image/*" style="font-size: 12px; margin-bottom: 5px;">
+                    </div>
+
+                    <button id="logoutBtn" class="secondary" style="width: 100%; margin-top: 15px;">Sign Out</button>
+                    <div id="dropdownMessage" style="margin-top: 10px; font-size: 12px; color: red; text-align: center;"></div>
+                </div>
+            </div>
+        </nav>
+        
+        <div style="padding: 40px; text-align: center; color: #888;">
+            <h3>Welcome to the Hub.</h3>
+            <p>Your content goes here.</p>
+        </div>
     </div>
 
     <script>
-        // 1. Initialize Supabase
+        // --- 1. CONFIGURATION ---
         const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
-        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // 2. Select HTML elements
+        let currentUser = null;
+        let userProfile = null;
+
+        // --- 2. HTML ELEMENTS ---
+        const authSection = document.getElementById('authSection');
+        const setupSection = document.getElementById('setupSection');
+        const appSection = document.getElementById('appSection');
+        
+        // Auth UI
         const emailInput = document.getElementById('email');
         const passwordInput = document.getElementById('password');
-        const loginBtn = document.getElementById('loginBtn');
-        const signupBtn = document.getElementById('signupBtn');
-        const logoutBtn = document.getElementById('logoutBtn');
+        const authMessage = document.getElementById('authMessage');
         
-        const loggedOutUI = document.getElementById('loggedOutUI');
-        const loggedInUI = document.getElementById('loggedInUI');
-        const welcomeText = document.getElementById('welcomeText');
-        const messageDiv = document.getElementById('message');
+        // Setup UI
+        const newUsernameInput = document.getElementById('newUsername');
+        const setupMessage = document.getElementById('setupMessage');
+        
+        // App UI
+        const navProfileIcon = document.getElementById('navProfileIcon');
+        const dropdownMenu = document.getElementById('dropdownMenu');
+        const displayUsername = document.getElementById('displayUsername');
+        const updateUsernameInput = document.getElementById('updateUsernameInput');
+        const pfpUpload = document.getElementById('pfpUpload');
+        const dropdownMessage = document.getElementById('dropdownMessage');
 
-        // Helper function to show messages
-        function showMessage(text, isError = false) {
-            messageDiv.style.display = 'block';
-            messageDiv.textContent = text;
-            messageDiv.className = isError ? 'error' : 'success';
-        }
-
-        // Helper function to hide the message box
-        function clearMessage() {
-            messageDiv.style.display = 'none';
-        }
-
-        // 3. Listen for Authentication Changes (The Magic Part!)
-        // This runs automatically when the page loads, and anytime the user logs in or out.
-        supabaseClient.auth.onAuthStateChange((event, session) => {
+        // --- 3. CORE LOGIC: AUTH STATE CHANGE ---
+        supabase.auth.onAuthStateChange(async (event, session) => {
             if (session) {
-                // User is logged in (e.g., they just clicked the email link)
-                loggedOutUI.style.display = 'none';
-                loggedInUI.style.display = 'block';
-                welcomeText.textContent = `Welcome, ${session.user.email}!`;
-                clearMessage();
+                currentUser = session.user;
+                await checkUserProfile();
             } else {
-                // User is logged out
-                loggedInUI.style.display = 'none';
-                loggedOutUI.style.display = 'block';
-                emailInput.value = '';
-                passwordInput.value = '';
+                currentUser = null;
+                userProfile = null;
+                showSection(authSection);
             }
         });
 
-        // 4. Handle Sign Up
-        signupBtn.addEventListener('click', async () => {
-            clearMessage();
-            const email = emailInput.value;
-            const password = passwordInput.value;
+        async function checkUserProfile() {
+            // Fetch profile for the logged in user
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', currentUser.id)
+                .single();
 
-            if (!email || !password) return showMessage("Please enter both email and password.", true);
-
-            showMessage("Creating account...");
-            const { error } = await supabaseClient.auth.signUp({ email, password });
-
-            if (error) {
-                showMessage(error.message, true);
+            if (data && data.username) {
+                // User has a profile and username -> Go to App
+                userProfile = data;
+                displayUsername.textContent = userProfile.username;
+                updateUsernameInput.value = userProfile.username;
+                
+                if (userProfile.avatar_base64) {
+                    navProfileIcon.src = userProfile.avatar_base64;
+                }
+                showSection(appSection);
             } else {
-                showMessage("Success! Check your email to confirm your account.");
+                // User exists in Auth, but no username set yet -> Go to Setup
+                showSection(setupSection);
+            }
+        }
+
+        function showSection(section) {
+            authSection.style.display = 'none';
+            setupSection.style.display = 'none';
+            appSection.style.display = 'none';
+            section.style.display = 'block';
+        }
+
+        // --- 4. EVENT LISTENERS: AUTH ---
+        document.getElementById('signupBtn').addEventListener('click', async () => {
+            authMessage.textContent = "Loading...";
+            const { error } = await supabase.auth.signUp({ 
+                email: emailInput.value, password: passwordInput.value 
+            });
+            authMessage.textContent = error ? error.message : "Check your email to confirm!";
+            authMessage.style.color = error ? "red" : "green";
+        });
+
+        document.getElementById('loginBtn').addEventListener('click', async () => {
+            authMessage.textContent = "Loading...";
+            const { error } = await supabase.auth.signInWithPassword({ 
+                email: emailInput.value, password: passwordInput.value 
+            });
+            if (error) authMessage.textContent = error.message;
+        });
+
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await supabase.auth.signOut();
+            dropdownMenu.classList.remove('active');
+        });
+
+        // --- 5. EVENT LISTENERS: PROFILES ---
+        
+        // Save initial username
+        document.getElementById('saveUsernameBtn').addEventListener('click', async () => {
+            const username = newUsernameInput.value.trim();
+            if (!username) return setupMessage.textContent = "Username cannot be empty.";
+            
+            setupMessage.textContent = "Saving...";
+            const { error } = await supabase.from('profiles').upsert({ 
+                id: currentUser.id, 
+                username: username 
+            });
+
+            if (error) {
+                setupMessage.textContent = error.message.includes('unique') ? "Username already taken." : error.message;
+            } else {
+                await checkUserProfile(); // Reload state
             }
         });
 
-        // 5. Handle Log In
-        loginBtn.addEventListener('click', async () => {
-            clearMessage();
-            const email = emailInput.value;
-            const password = passwordInput.value;
-
-            if (!email || !password) return showMessage("Please enter both email and password.", true);
-
-            showMessage("Logging in...");
-            const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        // Update username from dropdown
+        document.getElementById('updateUsernameBtn').addEventListener('click', async () => {
+            const newName = updateUsernameInput.value.trim();
+            if (!newName) return dropdownMessage.textContent = "Username cannot be empty.";
+            
+            dropdownMessage.textContent = "Updating...";
+            const { error } = await supabase.from('profiles').upsert({ 
+                id: currentUser.id, 
+                username: newName,
+                avatar_base64: userProfile ? userProfile.avatar_base64 : null // keep existing pfp
+            });
 
             if (error) {
-                showMessage(error.message, true);
+                dropdownMessage.textContent = error.message.includes('unique') ? "Username taken." : error.message;
+            } else {
+                dropdownMessage.textContent = "Updated successfully!";
+                dropdownMessage.style.color = "green";
+                await checkUserProfile(); // refresh UI
+                setTimeout(() => dropdownMessage.textContent = "", 2000);
             }
-            // If successful, onAuthStateChange automatically fires and changes the UI!
         });
 
-        // 6. Handle Log Out
-        logoutBtn.addEventListener('click', async () => {
-            const { error } = await supabaseClient.auth.signOut();
-            if (error) {
-                showMessage("Error logging out: " + error.message, true);
+        // Toggle dropdown visibility
+        navProfileIcon.addEventListener('click', () => {
+            dropdownMenu.classList.toggle('active');
+        });
+
+        // --- 6. IMAGE COMPRESSION & BASE64 UPLOAD ---
+        pfpUpload.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            dropdownMessage.textContent = "Compressing image...";
+            dropdownMessage.style.color = "#333";
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = async function() {
+                    // Create a canvas to resize the image
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 200; // Small size for profile pics
+                    
+                    // Calculate new dimensions keeping aspect ratio
+                    const scaleSize = MAX_WIDTH / img.width;
+                    canvas.width = MAX_WIDTH;
+                    canvas.height = img.height * scaleSize;
+
+                    // Draw compressed image to canvas
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                    // Convert to base64 JPEG with 0.8 (80%) quality
+                    const base64Jpeg = canvas.toDataURL('image/jpeg', 0.8);
+
+                    dropdownMessage.textContent = "Saving to database...";
+
+                    // Save to Supabase
+                    const { error } = await supabase.from('profiles').upsert({ 
+                        id: currentUser.id, 
+                        username: userProfile.username,
+                        avatar_base64: base64Jpeg 
+                    });
+
+                    if (error) {
+                        dropdownMessage.textContent = "Error: " + error.message;
+                        dropdownMessage.style.color = "red";
+                    } else {
+                        dropdownMessage.textContent = "Profile picture updated!";
+                        dropdownMessage.style.color = "green";
+                        await checkUserProfile(); // Refresh the icon in the navbar
+                        setTimeout(() => dropdownMessage.textContent = "", 2000);
+                    }
+                }
+                img.src = e.target.result;
             }
-            // If successful, onAuthStateChange automatically fires and changes the UI!
+            reader.readAsDataURL(file);
         });
     </script>
-
 </body>
 </html>
