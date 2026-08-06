@@ -133,7 +133,9 @@
         // --- 1. CONFIGURATION ---
         const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        
+        // FIX: Renamed variable to supabaseClient
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         let currentUser = null;
         let userProfile = null;
@@ -161,7 +163,7 @@
         const dropdownMessage = document.getElementById('dropdownMessage');
 
         // --- 3. CORE LOGIC: AUTH STATE CHANGE ---
-        supabase.auth.onAuthStateChange(async (event, session) => {
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
             if (session) {
                 currentUser = session.user;
                 await checkUserProfile();
@@ -174,7 +176,7 @@
 
         async function checkUserProfile() {
             // Fetch profile for the logged in user
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
                 .from('profiles')
                 .select('*')
                 .eq('id', currentUser.id)
@@ -206,7 +208,7 @@
         // --- 4. EVENT LISTENERS: AUTH ---
         document.getElementById('signupBtn').addEventListener('click', async () => {
             authMessage.textContent = "Loading...";
-            const { error } = await supabase.auth.signUp({ 
+            const { error } = await supabaseClient.auth.signUp({ 
                 email: emailInput.value, password: passwordInput.value 
             });
             authMessage.textContent = error ? error.message : "Check your email to confirm!";
@@ -215,14 +217,14 @@
 
         document.getElementById('loginBtn').addEventListener('click', async () => {
             authMessage.textContent = "Loading...";
-            const { error } = await supabase.auth.signInWithPassword({ 
+            const { error } = await supabaseClient.auth.signInWithPassword({ 
                 email: emailInput.value, password: passwordInput.value 
             });
             if (error) authMessage.textContent = error.message;
         });
 
         document.getElementById('logoutBtn').addEventListener('click', async () => {
-            await supabase.auth.signOut();
+            await supabaseClient.auth.signOut();
             dropdownMenu.classList.remove('active');
         });
 
@@ -234,7 +236,7 @@
             if (!username) return setupMessage.textContent = "Username cannot be empty.";
             
             setupMessage.textContent = "Saving...";
-            const { error } = await supabase.from('profiles').upsert({ 
+            const { error } = await supabaseClient.from('profiles').upsert({ 
                 id: currentUser.id, 
                 username: username 
             });
@@ -252,7 +254,7 @@
             if (!newName) return dropdownMessage.textContent = "Username cannot be empty.";
             
             dropdownMessage.textContent = "Updating...";
-            const { error } = await supabase.from('profiles').upsert({ 
+            const { error } = await supabaseClient.from('profiles').upsert({ 
                 id: currentUser.id, 
                 username: newName,
                 avatar_base64: userProfile ? userProfile.avatar_base64 : null // keep existing pfp
@@ -304,7 +306,7 @@
                     dropdownMessage.textContent = "Saving to database...";
 
                     // Save to Supabase
-                    const { error } = await supabase.from('profiles').upsert({ 
+                    const { error } = await supabaseClient.from('profiles').upsert({ 
                         id: currentUser.id, 
                         username: userProfile.username,
                         avatar_base64: base64Jpeg 
