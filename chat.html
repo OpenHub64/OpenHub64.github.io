@@ -310,7 +310,7 @@
             if (msgs.length === 0) { box.innerHTML = '<div style="text-align:center; color:#949ba4; margin-top:20px;">No messages here yet. Say hi!</div>'; return; }
 
             msgs.forEach(m => {
-                const pId = m.profile_id || m.sender_id; // Support both channel and DM sender IDs
+                const pId = m.profile_id || m.sender_id;
                 const username = m.profiles?.username || 'User';
                 const avatar = m.profiles?.avatar_base64 || DEFAULT_AVATAR;
                 const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -389,7 +389,6 @@
                     ${userId !== currentUser.id ? `<button class="modal-btn" id="friendBtn" onclick="sendFriendRequest('${userId}')">Send Friend Request</button>` : ''}
                 `;
                 
-                // Check friend request status to update button
                 if (userId !== currentUser.id) {
                     const { data: req } = await supabaseClient.from('friend_requests').select('status').or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${userId}),and(sender_id.eq.${userId},receiver_id.eq.${currentUser.id})`).maybeSingle();
                     if (req) {
@@ -405,7 +404,6 @@
 
         function closeProfileModal() { document.getElementById('profileModal').style.display = 'none'; }
 
-        // Avatar file to base64 converter
         function previewAvatar(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -421,12 +419,14 @@
             const username = document.getElementById('editUsername').value.trim();
             const bio = document.getElementById('editBio').value.trim();
             const previewImg = document.getElementById('editAvatarPreview');
-            const avatarBase64 = previewImg.dataset.base64 || previewImg.src;
+            
+            // Fixed variable definition
+            const avatar_base64 = previewImg.dataset.base64 || previewImg.src;
 
             await supabaseClient.from('profiles').update({ username, bio, avatar_base64 }).eq('id', currentUser.id);
             await loadMyProfileData();
             closeProfileModal();
-            if (activeMode === 'DM') showDMView(); // Refresh sidebar UI
+            if (activeMode === 'DM') showDMView();
         }
 
         async function sendFriendRequest(receiverId) {
