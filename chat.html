@@ -247,8 +247,7 @@
             
             <div style="border-top:1px solid #2b2d31; padding-top:16px; margin-top:16px;">
                 <h4 style="margin:0 0 10px 0;">Members / Invites</h4>
-                <div id="serverMemberList" style="max-height: 180px; overflow-y: auto;">
-                    </div>
+                <div id="serverMemberList" style="max-height: 180px; overflow-y: auto;"></div>
             </div>
 
             <div style="border-top:1px solid #2b2d31; padding-top:16px; margin-top:20px;">
@@ -433,7 +432,7 @@
             loadChannelMessages();
         }
 
-        // --- CHANNEL MANAGEMENT (NO ALERTS / PROMPTS) ---
+        // --- CHANNEL MANAGEMENT ---
         function openCreateChannelModal() { document.getElementById('channelModal').style.display = 'flex'; }
         function closeChannelModal() { document.getElementById('channelModal').style.display = 'none'; }
 
@@ -486,12 +485,16 @@
             box.innerHTML = '';
             activeMessagesMap.clear();
 
-            if (msgs.length === 0) { box.innerHTML = '<div style="text-align:center; color:#949ba4; margin-top:20px;">No messages here yet. Say hi!</div>'; return; }
+            if (msgs.length === 0) { 
+                box.innerHTML = '<div style="text-align:center; color:#949ba4; margin-top:20px;">No messages here yet. Say hi!</div>'; 
+                return; 
+            }
 
             const myUsername = myProfileData?.username?.toLowerCase() || '';
 
             msgs.forEach(m => {
-                activeMessagesMap.set(m.id, m);
+                const msgIdStr = String(m.id);
+                activeMessagesMap.set(msgIdStr, m);
 
                 const pId = m.profile_id || m.sender_id;
                 const username = m.profiles?.username || 'User';
@@ -509,7 +512,7 @@
 
                 const div = document.createElement('div');
                 div.className = `message ${isMentioned ? 'mentioned' : ''}`;
-                div.id = `msg-row-${m.id}`;
+                div.id = `msg-row-${msgIdStr}`;
                 div.innerHTML = `
                     <img class="msg-avatar" src="${avatar}" onclick="openProfileModal('${pId}')" title="View Profile">
                     <div style="flex:1;">
@@ -518,12 +521,12 @@
                             <span class="msg-time">${time}</span>
                             ${m.is_edited ? '<span class="msg-edited">(edited)</span>' : ''}
                         </div>
-                        <div class="msg-text" id="msg-text-${m.id}">${formattedContent}</div>
+                        <div class="msg-text" id="msg-text-${msgIdStr}">${formattedContent}</div>
                     </div>
                     ${(canEdit || canDelete) ? `
                         <div class="msg-actions">
-                            ${canEdit ? `<div class="msg-action-btn" onclick="startInlineEdit('${m.id}')">✏️ Edit</div>` : ''}
-                            ${canDelete ? `<div class="msg-action-btn delete" onclick="deleteMessage('${m.id}')">🗑️ Delete</div>` : ''}
+                            ${canEdit ? `<div class="msg-action-btn" onclick="startInlineEdit('${msgIdStr}')">✏️ Edit</div>` : ''}
+                            ${canDelete ? `<div class="msg-action-btn delete" onclick="deleteMessage('${msgIdStr}')">🗑️ Delete</div>` : ''}
                         </div>
                     ` : ''}
                 `;
@@ -532,62 +535,72 @@
             box.scrollTop = box.scrollHeight;
         }
 
-        // --- INLINE EDITING (NO ALERTS/PROMPTS) ---
         function startInlineEdit(msgId) {
-            const msgObj = activeMessagesMap.get(msgId);
-            if (!msgObj) return;
+            const msgIdStr = String(msgId);
+            const msgObj = activeMessagesMap.get(msgIdStr);
 
-            const textElem = document.getElementById(`msg-text-${msgId}`);
-            if (!textElem) return;
+            if (!msgObj) {
+                console.error('Could not find message in memory for ID:', msgIdStr);
+                return;
+            }
+
+            const textElem = document.getElementById(`msg-text-${msgIdStr}`);
+            if (!textElem) {
+                console.error('Could not find text element for ID:', `msg-text-${msgIdStr}`);
+                return;
+            }
 
             textElem.innerHTML = `
                 <div class="edit-box-wrapper">
-                    <input type="text" class="edit-input" id="edit-input-${msgId}" value="${escapeHTML(msgObj.content)}">
+                    <input type="text" class="edit-input" id="edit-input-${msgIdStr}" value="${escapeHTML(msgObj.content)}">
                     <div class="edit-actions-btns">
-                        <button class="edit-btn-save" onclick="saveInlineEdit('${msgId}')">Save</button>
-                        <button class="edit-btn-cancel" onclick="cancelInlineEdit('${msgId}')">Cancel</button>
+                        <button class="edit-btn-save" onclick="saveInlineEdit('${msgIdStr}')">Save</button>
+                        <button class="edit-btn-cancel" onclick="cancelInlineEdit('${msgIdStr}')">Cancel</button>
                     </div>
                 </div>
             `;
 
-            const input = document.getElementById(`edit-input-${msgId}`);
+            const input = document.getElementById(`edit-input-${msgIdStr}`);
             if (input) {
                 input.focus();
+                input.selectionStart = input.selectionEnd = input.value.length;
                 input.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') saveInlineEdit(msgId);
-                    if (e.key === 'Escape') cancelInlineEdit(msgId);
+                    if (e.key === 'Enter') saveInlineEdit(msgIdStr);
+                    if (e.key === 'Escape') cancelInlineEdit(msgIdStr);
                 });
             }
         }
 
         function cancelInlineEdit(msgId) {
-            const msgObj = activeMessagesMap.get(msgId);
+            const msgIdStr = String(msgId);
+            const msgObj = activeMessagesMap.get(msgIdStr);
             if (!msgObj) return;
-            const textElem = document.getElementById(`msg-text-${msgId}`);
+            const textElem = document.getElementById(`msg-text-${msgIdStr}`);
             if (textElem) {
                 textElem.innerHTML = escapeHTML(msgObj.content).replace(/@(\w+)/g, '<span class="mention-tag">@$1</span>');
             }
         }
 
         async function saveInlineEdit(msgId) {
-            const input = document.getElementById(`edit-input-${msgId}`);
+            const msgIdStr = String(msgId);
+            const input = document.getElementById(`edit-input-${msgIdStr}`);
             if (!input) return;
 
             const newContent = input.value.trim();
-            const msgObj = activeMessagesMap.get(msgId);
+            const msgObj = activeMessagesMap.get(msgIdStr);
 
-            if (!newContent) return; // Ignore empty edits
+            if (!newContent) return;
             if (newContent === msgObj.content) {
-                cancelInlineEdit(msgId);
+                cancelInlineEdit(msgIdStr);
                 return;
             }
 
             const table = activeMode === 'DM' ? 'direct_messages' : 'messages';
             
-            let res = await supabaseClient.from(table).update({ content: newContent, is_edited: true }).eq('id', msgId);
+            let res = await supabaseClient.from(table).update({ content: newContent, is_edited: true }).eq('id', msgId).select();
             if (res.error) {
                 console.warn('Fallback update without is_edited flag...', res.error);
-                res = await supabaseClient.from(table).update({ content: newContent }).eq('id', msgId);
+                res = await supabaseClient.from(table).update({ content: newContent }).eq('id', msgId).select();
             }
 
             if (res.error) {
@@ -600,8 +613,9 @@
         }
 
         async function deleteMessage(msgId) {
+            const msgIdStr = String(msgId);
             const table = activeMode === 'DM' ? 'direct_messages' : 'messages';
-            const { error } = await supabaseClient.from(table).delete().eq('id', msgId);
+            const { error } = await supabaseClient.from(table).delete().eq('id', msgIdStr);
             if (error) {
                 console.error('Error deleting message:', error);
                 return;
