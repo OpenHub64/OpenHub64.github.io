@@ -3,519 +3,215 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="data:,">
-    <title>OpenHub</title>
+    <title>OpenHub Portal</title>
     <style>
-        /* Global Styles */
+        :root {
+            --bg-color: #313338;
+            --card-bg: #2b2d31;
+            --text-color: #dbdee1;
+            --text-heading: #f2f3f5;
+            --text-sub: #949ba4;
+            --accent-color: #5865f2;
+            --accent-hover: #4752c4;
+            --border-color: #232428;
+            --shadow: rgba(0, 0, 0, 0.3);
+        }
+
+        body.light-mode {
+            --bg-color: #f2f3f5;
+            --card-bg: #ffffff;
+            --text-color: #313338;
+            --text-heading: #060607;
+            --text-sub: #5c5e66;
+            --accent-color: #5865f2;
+            --accent-hover: #4752c4;
+            --border-color: #e3e5e8;
+            --shadow: rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
         body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
-            background-color: #f4f4f9;
-            color: #333;
-        }
-
-        /* Reusable UI */
-        .container {
-            max-width: 400px;
-            margin: 60px auto;
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="text"], input[type="email"], input[type="password"] {
-            width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;
-        }
-        .button-group { display: flex; gap: 10px; margin-top: 20px; }
-        button {
-            flex: 1; background-color: #3ECF8E; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; font-size: 16px;
-        }
-        button.secondary { background-color: #333; }
-        button:hover { opacity: 0.9; }
-
-        /* App Layout (Navbar) */
-        #appSection { display: none; }
-        .navbar {
-            background-color: #1a1a1a; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center;
-        }
-        .navbar h1 { margin: 0; font-size: 24px; color: #3ECF8E; }
-        
-        /* Profile Dropdown */
-        .profile-menu { position: relative; }
-        .profile-icon {
-            width: 40px; height: 40px; border-radius: 50%; cursor: pointer; object-fit: cover; border: 2px solid #3ECF8E;
-        }
-        .dropdown {
-            display: none; position: absolute; right: 0; top: 50px; background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 250px; padding: 20px; color: #333; z-index: 100;
-        }
-        .dropdown.active { display: block; }
-        .dropdown h4 { margin: 0 0 15px 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }
-        .dropdown .form-group { margin-bottom: 10px; }
-        
-        /* Dashboard Windows Grid */
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            padding: 40px 20px 20px 20px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        .window-card {
-            background: white;
-            border-radius: 8px;
-            padding: 25px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            text-decoration: none;
-            color: #333;
-            transition: transform 0.2s, box-shadow 0.2s;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            min-height: 100vh;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            text-align: center;
         }
-        .window-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 15px rgba(0,0,0,0.15);
-        }
-        .window-card h3 { color: #3ECF8E; margin-top: 0; font-size: 22px; }
-        .window-card p { color: #666; margin-bottom: 0; line-height: 1.4; }
 
-        /* Friends Section Styles */
-        .friends-section {
-            max-width: 1000px;
-            margin: 0 auto 40px auto;
-            padding: 0 20px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .friends-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .friends-card h3 { margin-top: 0; color: #1a1a1a; font-size: 18px; border-bottom: 2px solid #3ECF8E; padding-bottom: 8px; }
-        
-        .search-box { display: flex; gap: 8px; margin-bottom: 15px; }
-        .search-box input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-        .search-box button { flex: none; padding: 8px 15px; }
-
-        .user-list { list-style: none; padding: 0; margin: 0; max-height: 200px; overflow-y: auto; }
-        .user-item {
+        header {
+            height: 60px;
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 10px;
-            border-bottom: 1px solid #eee;
+            padding: 0 24px;
+            box-shadow: 0 2px 4px var(--shadow);
         }
-        .user-item-info { display: flex; align-items: center; gap: 10px; }
-        .user-item-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; }
-        .user-item button { padding: 5px 10px; font-size: 12px; }
 
-        #authSection { display: block; } 
-        #setupSection { display: none; }
+        .logo-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--text-heading);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .theme-toggle-btn {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .theme-toggle-btn:hover {
+            border-color: var(--accent-color);
+        }
+
+        main {
+            flex: 1;
+            max-width: 900px;
+            width: 100%;
+            margin: 40px auto;
+            padding: 0 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .hub-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 4px 12px var(--shadow);
+        }
+
+        .card-info {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .card-title {
+            font-size: 22px;
+            font-weight: bold;
+            color: var(--text-heading);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-desc {
+            font-size: 14px;
+            color: var(--text-sub);
+            max-width: 500px;
+            line-height: 1.4;
+        }
+
+        .card-btn {
+            background-color: var(--accent-color);
+            color: white;
+            text-decoration: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 15px;
+            transition: background-color 0.2s ease;
+        }
+
+        .card-btn:hover {
+            background-color: var(--accent-hover);
+        }
     </style>
-
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
-    <div id="authSection" class="container">
-        <h2 style="text-align: center; margin-bottom: 20px;">Welcome to OpenHub</h2>
-        <div class="form-group">
-            <label>Email</label>
-            <input type="email" id="email" placeholder="you@example.com">
+    <header>
+        <div class="logo-title">
+            <span>🚀</span> OpenHub Portal
         </div>
-        <div class="form-group">
-            <label>Password</label>
-            <input type="password" id="password" placeholder="••••••••">
-        </div>
-        <div class="button-group">
-            <button id="loginBtn">Log In</button>
-            <button id="signupBtn" class="secondary">Sign Up</button>
-        </div>
-        <div id="authMessage" style="margin-top: 15px; text-align: center; color: red;"></div>
-    </div>
+        <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()">
+            <span id="themeIcon">🌙</span> <span id="themeText">Dark Mode</span>
+        </button>
+    </header>
 
-    <div id="setupSection" class="container">
-        <h2 style="text-align: center;">Set Your Username</h2>
-        <p style="text-align: center; font-size: 14px; color: #666;">You need a username before you can enter OpenHub.</p>
-        <div class="form-group">
-            <input type="text" id="newUsername" placeholder="e.g. CoolUser99">
-        </div>
-        <button id="saveUsernameBtn" style="width: 100%;">Save & Continue</button>
-        <div id="setupMessage" style="margin-top: 15px; text-align: center; color: red;"></div>
-    </div>
-
-    <div id="appSection">
-        <nav class="navbar">
-            <h1>OpenHub</h1>
-            <div class="profile-menu">
-                <img id="navProfileIcon" class="profile-icon" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>">
-                
-                <div id="dropdownMenu" class="dropdown">
-                    <h4>Hello, <span id="displayUsername">User</span>!</h4>
-                    
-                    <div class="form-group">
-                        <label>Change Username</label>
-                        <input type="text" id="updateUsernameInput" placeholder="New username">
-                        <button id="updateUsernameBtn" style="margin-top: 5px; width: 100%; font-size: 14px;">Update</button>
-                    </div>
-
-                    <div class="form-group" style="margin-top: 20px;">
-                        <label>Change Profile Picture</label>
-                        <input type="file" id="pfpUpload" accept="image/*" style="font-size: 12px; margin-bottom: 5px;">
-                    </div>
-
-                    <button id="logoutBtn" class="secondary" style="width: 100%; margin-top: 15px;">Sign Out</button>
-                    <div id="dropdownMessage" style="margin-top: 10px; font-size: 12px; color: red; text-align: center;"></div>
+    <main>
+        <div class="hub-card">
+            <div class="card-info">
+                <div class="card-title">
+                    💬 Discord Chat
+                </div>
+                <div class="card-desc">
+                    Connect with friends, chat in real-time server channels, send direct messages, and use Discord features.
                 </div>
             </div>
-        </nav>
-        
-        <div class="dashboard-grid">
-            <a href="games.html" class="window-card">
-                <h3>🎮 Games</h3>
-                <p>Play awesome browser games directly from the hub.</p>
-            </a>
-            <a href="tools.html" class="window-card">
-                <h3>🛠️ Tools</h3>
-                <p>Access calculators, notes, and other useful utilities.</p>
-            </a>
-            <a href="chat.html" class="window-card">
-                <h3>💬 Chat</h3>
-                <p>Jump into the global chat and talk with other OpenHub users.</p>
-            </a>
+            <a href="chat.html" class="card-btn">Open Chat</a>
         </div>
 
-        <div class="friends-section">
-            <div class="friends-card">
-                <h3>🔍 Find Friends</h3>
-                <div class="search-box">
-                    <input type="text" id="searchUserInput" placeholder="Search username...">
-                    <button id="searchUserBtn">Search</button>
+        <div class="hub-card">
+            <div class="card-info">
+                <div class="card-title">
+                    🎮 3D Platformer Game
                 </div>
-                <ul id="searchResultsList" class="user-list"></ul>
+                <div class="card-desc">
+                    Jump into the 3D platformer game world, overcome obstacles, and reach the finish line.
+                </div>
             </div>
-
-            <div class="friends-card">
-                <h3>👥 My Friends</h3>
-                <ul id="friendsList" class="user-list"></ul>
-            </div>
+            <a href="3D platformer game.html" class="card-btn">Play Game</a>
         </div>
-    </div>
+    </main>
 
     <script>
-        // --- 1. CONFIGURATION ---
-        const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
-        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-        let currentUser = null;
-        let userProfile = null;
-        const DEFAULT_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>";
-
-        // --- 2. HTML ELEMENTS ---
-        const authSection = document.getElementById('authSection');
-        const setupSection = document.getElementById('setupSection');
-        const appSection = document.getElementById('appSection');
+        // Check saved theme preference or default to dark
+        const currentTheme = localStorage.getItem('theme') || 'dark';
         
-        const emailInput = document.getElementById('email');
-        const passwordInput = document.getElementById('password');
-        const authMessage = document.getElementById('authMessage');
-        
-        const newUsernameInput = document.getElementById('newUsername');
-        const setupMessage = document.getElementById('setupMessage');
-        
-        const navProfileIcon = document.getElementById('navProfileIcon');
-        const dropdownMenu = document.getElementById('dropdownMenu');
-        const displayUsername = document.getElementById('displayUsername');
-        const updateUsernameInput = document.getElementById('updateUsernameInput');
-        const pfpUpload = document.getElementById('pfpUpload');
-        const dropdownMessage = document.getElementById('dropdownMessage');
-
-        const searchUserInput = document.getElementById('searchUserInput');
-        const searchUserBtn = document.getElementById('searchUserBtn');
-        const searchResultsList = document.getElementById('searchResultsList');
-        const friendsList = document.getElementById('friendsList');
-
-        // --- 3. CORE LOGIC: AUTH STATE CHANGE ---
-        supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            if (session) {
-                currentUser = session.user;
-                await checkUserProfile();
-            } else {
-                currentUser = null;
-                userProfile = null;
-                showSection(authSection);
-            }
-        });
-
-        async function checkUserProfile() {
-            const { data, error } = await supabaseClient
-                .from('profiles')
-                .select('*')
-                .eq('id', currentUser.id)
-                .single();
-
-            if (data && data.username) {
-                userProfile = data;
-                displayUsername.textContent = userProfile.username;
-                updateUsernameInput.value = userProfile.username;
-                
-                if (userProfile.avatar_base64) {
-                    navProfileIcon.src = userProfile.avatar_base64;
-                }
-                showSection(appSection);
-                loadFriends();
-            } else {
-                showSection(setupSection);
-            }
+        if (currentTheme === 'light') {
+            document.body.classList.add('light-mode');
+            updateThemeUI('light');
+        } else {
+            updateThemeUI('dark');
         }
 
-        function showSection(section) {
-            authSection.style.display = 'none';
-            setupSection.style.display = 'none';
-            appSection.style.display = 'none';
-            section.style.display = 'block';
-        }
-
-        // --- 4. EVENT LISTENERS: AUTH ---
-        document.getElementById('signupBtn').addEventListener('click', async () => {
-            authMessage.textContent = "Loading...";
-            const { error } = await supabaseClient.auth.signUp({ 
-                email: emailInput.value, password: passwordInput.value 
-            });
-            authMessage.textContent = error ? error.message : "Check your email to confirm!";
-            authMessage.style.color = error ? "red" : "green";
-        });
-
-        document.getElementById('loginBtn').addEventListener('click', async () => {
-            authMessage.textContent = "Loading...";
-            const { error } = await supabaseClient.auth.signInWithPassword({ 
-                email: emailInput.value, password: passwordInput.value 
-            });
-            if (error) authMessage.textContent = error.message;
-        });
-
-        document.getElementById('logoutBtn').addEventListener('click', async () => {
-            await supabaseClient.auth.signOut();
-            dropdownMenu.classList.remove('active');
-        });
-
-        // --- 5. PROFILE UPDATES ---
-        document.getElementById('saveUsernameBtn').addEventListener('click', async () => {
-            const username = newUsernameInput.value.trim();
-            if (!username) return setupMessage.textContent = "Username cannot be empty.";
+        function toggleTheme() {
+            document.body.classList.toggle('light-mode');
+            const isLight = document.body.classList.contains('light-mode');
+            const theme = isLight ? 'light' : 'dark';
             
-            setupMessage.textContent = "Saving...";
-            const { error } = await supabaseClient.from('profiles').upsert({ 
-                id: currentUser.id, username: username 
-            });
-
-            if (error) {
-                setupMessage.textContent = error.message.includes('unique') ? "Username already taken." : error.message;
-            } else {
-                await checkUserProfile();
-            }
-        });
-
-        document.getElementById('updateUsernameBtn').addEventListener('click', async () => {
-            const newName = updateUsernameInput.value.trim();
-            if (!newName) return dropdownMessage.textContent = "Username cannot be empty.";
-            
-            dropdownMessage.textContent = "Updating...";
-            const { error } = await supabaseClient.from('profiles').upsert({ 
-                id: currentUser.id, 
-                username: newName,
-                avatar_base64: userProfile ? userProfile.avatar_base64 : null
-            });
-
-            if (error) {
-                dropdownMessage.textContent = error.message.includes('unique') ? "Username taken." : error.message;
-            } else {
-                dropdownMessage.textContent = "Updated successfully!";
-                dropdownMessage.style.color = "green";
-                await checkUserProfile();
-                setTimeout(() => dropdownMessage.textContent = "", 2000);
-            }
-        });
-
-        navProfileIcon.addEventListener('click', () => {
-            dropdownMenu.classList.toggle('active');
-        });
-
-        // --- 6. IMAGE COMPRESSION & BASE64 UPLOAD ---
-        pfpUpload.addEventListener('change', function(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            dropdownMessage.textContent = "Compressing image...";
-            dropdownMessage.style.color = "#333";
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const img = new Image();
-                img.onload = async function() {
-                    const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 200;
-                    const scaleSize = MAX_WIDTH / img.width;
-                    canvas.width = MAX_WIDTH;
-                    canvas.height = img.height * scaleSize;
-
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-                    const base64Jpeg = canvas.toDataURL('image/jpeg', 0.8);
-
-                    dropdownMessage.textContent = "Saving to database...";
-
-                    const { error } = await supabaseClient.from('profiles').upsert({ 
-                        id: currentUser.id, 
-                        username: userProfile.username,
-                        avatar_base64: base64Jpeg 
-                    });
-
-                    if (error) {
-                        dropdownMessage.textContent = "Error: " + error.message;
-                        dropdownMessage.style.color = "red";
-                    } else {
-                        dropdownMessage.textContent = "Profile picture updated!";
-                        dropdownMessage.style.color = "green";
-                        await checkUserProfile();
-                        setTimeout(() => dropdownMessage.textContent = "", 2000);
-                    }
-                }
-                img.src = e.target.result;
-            }
-            reader.readAsDataURL(file);
-        });
-
-        // --- 7. FRIEND SYSTEM LOGIC ---
-        searchUserBtn.addEventListener('click', async () => {
-            const query = searchUserInput.value.trim();
-            if (!query) return;
-
-            searchResultsList.innerHTML = '<li style="padding:10px; color:#888;">Searching...</li>';
-
-            // Search for usernames matching the search term (case-insensitive)
-            const { data, error } = await supabaseClient
-                .from('profiles')
-                .select('id, username, avatar_base64')
-                .ilike('username', `%${query}%`)
-                .neq('id', currentUser.id)
-                .limit(5);
-
-            searchResultsList.innerHTML = '';
-
-            if (error || !data || data.length === 0) {
-                searchResultsList.innerHTML = '<li style="padding:10px; color:#888;">No users found.</li>';
-                return;
-            }
-
-            data.forEach(user => {
-                const li = document.createElement('li');
-                li.className = 'user-item';
-                li.innerHTML = `
-                    <div class="user-item-info">
-                        <img class="user-item-avatar" src="${user.avatar_base64 || DEFAULT_AVATAR}">
-                        <span>${user.username}</span>
-                    </div>
-                    <button onclick="sendFriendRequest('${user.id}')">Add Friend</button>
-                `;
-                searchResultsList.appendChild(li);
-            });
-        });
-
-        window.sendFriendRequest = async (friendId) => {
-            const { error } = await supabaseClient
-                .from('friendships')
-                .insert([{ user_id: currentUser.id, friend_id: friendId, status: 'pending' }]);
-
-            if (error) {
-                alert(error.message.includes('unique') ? "Request already sent!" : "Error: " + error.message);
-            } else {
-                alert("Friend request sent!");
-                loadFriends();
-            }
-        };
-
-        async function loadFriends() {
-            friendsList.innerHTML = '<li style="padding:10px; color:#888;">Loading...</li>';
-
-            // Fetch all friendships involving the current user
-            const { data, error } = await supabaseClient
-                .from('friendships')
-                .select(`
-                    id,
-                    user_id,
-                    friend_id,
-                    status,
-                    requester:profiles!friendships_user_id_fkey(id, username, avatar_base64),
-                    receiver:profiles!friendships_friend_id_fkey(id, username, avatar_base64)
-                `);
-
-            friendsList.innerHTML = '';
-
-            if (error || !data || data.length === 0) {
-                friendsList.innerHTML = '<li style="padding:10px; color:#888;">No friends yet.</li>';
-                return;
-            }
-
-            data.forEach(rel => {
-                const isRequester = rel.user_id === currentUser.id;
-                const otherUser = isRequester ? rel.receiver : rel.requester;
-
-                const li = document.createElement('li');
-                li.className = 'user-item';
-
-                if (rel.status === 'accepted') {
-                    li.innerHTML = `
-                        <div class="user-item-info">
-                            <img class="user-item-avatar" src="${otherUser.avatar_base64 || DEFAULT_AVATAR}">
-                            <span>${otherUser.username}</span>
-                        </div>
-                        <span style="font-size:12px; color:green;">Friends</span>
-                    `;
-                } else if (isRequester && rel.status === 'pending') {
-                    li.innerHTML = `
-                        <div class="user-item-info">
-                            <img class="user-item-avatar" src="${otherUser.avatar_base64 || DEFAULT_AVATAR}">
-                            <span>${otherUser.username}</span>
-                        </div>
-                        <span style="font-size:12px; color:#888;">Pending...</span>
-                    `;
-                } else if (!isRequester && rel.status === 'pending') {
-                    li.innerHTML = `
-                        <div class="user-item-info">
-                            <img class="user-item-avatar" src="${otherUser.avatar_base64 || DEFAULT_AVATAR}">
-                            <span>${otherUser.username}</span>
-                        </div>
-                        <button onclick="acceptFriendRequest(${rel.id})">Accept</button>
-                    `;
-                }
-
-                friendsList.appendChild(li);
-            });
+            localStorage.setItem('theme', theme);
+            updateThemeUI(theme);
         }
 
-        window.acceptFriendRequest = async (relationshipId) => {
-            const { error } = await supabaseClient
-                .from('friendships')
-                .update({ status: 'accepted' })
-                .eq('id', relationshipId);
-
-            if (error) {
-                alert("Error accepting request: " + error.message);
+        function updateThemeUI(theme) {
+            const themeIcon = document.getElementById('themeIcon');
+            const themeText = document.getElementById('themeText');
+            
+            if (theme === 'light') {
+                themeIcon.textContent = '☀️';
+                themeText.textContent = 'Light Mode';
             } else {
-                loadFriends();
+                themeIcon.textContent = '🌙';
+                themeText.textContent = 'Dark Mode';
             }
-        };
+        }
     </script>
 </body>
 </html>
