@@ -77,7 +77,7 @@
         .up-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; cursor: pointer; }
         .up-info { flex: 1; overflow: hidden; }
         .up-name { font-size: 14px; font-weight: bold; color: white; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-        .up-status { font-size: 11px; color: #949ba4; }
+        .up-status { font-size: 11px; color: #23a55a; }
         .up-settings { color: #949ba4; cursor: pointer; padding: 8px; border-radius: 4px; }
         .up-settings:hover { background: #35373c; color: white; }
 
@@ -104,6 +104,34 @@
         .msg-edited { font-size: 10px; color: #949ba4; margin-left: 4px; }
         .mention-tag { background: rgba(88, 101, 242, 0.3); color: #c9cdfb; padding: 0 2px; border-radius: 3px; font-weight: 500; }
 
+        /* Reply Quote Block */
+        .msg-reply-preview {
+            display: flex; align-items: center; gap: 6px; font-size: 12px; color: #b5bac1;
+            margin-bottom: 2px; padding-left: 12px; border-left: 2px solid #4e5058;
+        }
+        .msg-reply-author { font-weight: bold; color: #f2f3f5; }
+
+        /* Emoji Reaction Tags */
+        .reactions-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+        .reaction-badge {
+            display: inline-flex; align-items: center; gap: 4px; background: #2b2d31;
+            border: 1px solid #3b3d44; border-radius: 8px; padding: 2px 6px; font-size: 12px;
+            cursor: pointer; user-select: none;
+        }
+        .reaction-badge:hover { background: #35373c; border-color: #5865f2; }
+        .reaction-badge.active { background: rgba(88, 101, 242, 0.15); border-color: #5865f2; color: #c9cdfb; }
+
+        /* Action Bar on Hover */
+        .msg-actions {
+            display: none; position: absolute; right: 16px; top: -12px;
+            background: #313338; border: 1px solid #232428; border-radius: 4px;
+            overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.2); z-index: 5;
+        }
+        .message:hover .msg-actions { display: flex; }
+        .msg-action-btn { padding: 4px 8px; cursor: pointer; font-size: 12px; color: #b5bac1; }
+        .msg-action-btn:hover { background: #35373c; color: white; }
+        .msg-action-btn.delete:hover { background: #da373c; color: white; }
+
         /* Inline Message Editing UI */
         .edit-box-wrapper { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
         .edit-input {
@@ -114,21 +142,28 @@
         .edit-btn-save { background: #5865f2; color: white; border: none; border-radius: 3px; padding: 4px 10px; cursor: pointer; font-weight: bold; }
         .edit-btn-cancel { background: transparent; color: #949ba4; border: none; cursor: pointer; text-decoration: underline; }
 
-        /* Action bar on hover (Edit / Delete) */
-        .msg-actions {
-            display: none; position: absolute; right: 16px; top: -12px;
-            background: #313338; border: 1px solid #232428; border-radius: 4px;
-            overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        /* Input Area & Reply Preview Bar */
+        .input-bar { padding: 0 16px 16px; }
+        .reply-bar {
+            background-color: #2b2d31; border-top-left-radius: 8px; border-top-right-radius: 8px;
+            padding: 6px 12px; display: none; align-items: center; justify-content: space-between;
+            font-size: 12px; color: #b5bac1; border-bottom: 1px solid #1e1f22;
         }
-        .message:hover .msg-actions { display: flex; }
-        .msg-action-btn { padding: 4px 8px; cursor: pointer; font-size: 12px; color: #b5bac1; }
-        .msg-action-btn:hover { background: #35373c; color: white; }
-        .msg-action-btn.delete:hover { background: #da373c; color: white; }
-
-        /* Input Bar */
-        .input-bar { padding: 0 16px 20px; }
+        .reply-bar-close { cursor: pointer; font-weight: bold; color: #f2f3f5; }
         .input-wrapper { background-color: #383a40; border-radius: 8px; display: flex; padding: 10px 16px; }
+        .input-wrapper.has-reply { border-top-left-radius: 0; border-top-right-radius: 0; }
         #messageInput { background: transparent; border: none; outline: none; color: #dbdee1; width: 100%; font-size: 14px; }
+
+        /* Typing Indicator Text */
+        .typing-indicator { height: 18px; font-size: 12px; color: #949ba4; padding: 0 20px; font-style: italic; }
+
+        /* 4. Right Members Sidebar */
+        .members-sidebar {
+            width: 200px; background-color: #2b2d31; border-left: 1px solid #232428;
+            padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+        }
+        .member-card { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #949ba4; padding: 4px; border-radius: 4px; cursor: pointer; }
+        .member-card:hover { background: #35373c; color: #dbdee1; }
 
         /* Modals */
         .modal-overlay {
@@ -143,19 +178,11 @@
         .modal-btn { background: #5865f2; color: white; border: none; padding: 10px 16px; border-radius: 4px; cursor: pointer; width: 100%; font-weight: bold; margin-top: 10px; }
         .modal-btn.danger { background: #da373c; }
         .modal-btn.danger:hover { background: #a1282b; }
-        
-        /* Profile & Member List Specifics */
         .profile-header { display: flex; flex-direction: column; align-items: center; margin-bottom: 20px; }
         .profile-avatar-lg { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 4px solid #1e1f22; margin-bottom: 10px; }
         .profile-name-lg { font-size: 20px; font-weight: bold; }
         .close-btn { position: absolute; top: 12px; right: 16px; cursor: pointer; color: #949ba4; font-size: 18px; }
         .close-btn:hover { color: white; }
-
-        .member-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #2b2d31; }
-        .member-info { display: flex; align-items: center; gap: 8px; }
-        .sm-btn { padding: 4px 8px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold; }
-        .sm-btn.add { background: #23a55a; color: white; }
-        .sm-btn.remove { background: #da373c; color: white; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -197,11 +224,23 @@
         <div class="messages-box" id="messagesBox">
             <div style="text-align:center; color:#949ba4; margin-top:20px;">Welcome! Select a DM or server channel to start chatting.</div>
         </div>
+        
+        <div class="typing-indicator" id="typingIndicator"></div>
+
         <div class="input-bar">
+            <div class="reply-bar" id="replyBar">
+                <span>Replying to <b id="replyTargetUser">...</b></span>
+                <span class="reply-bar-close" onclick="cancelReply()">✖</span>
+            </div>
             <form class="input-wrapper" id="chatForm">
                 <input type="text" id="messageInput" placeholder="Message..." autocomplete="off">
             </form>
         </div>
+    </div>
+
+    <div class="members-sidebar">
+        <div class="section-title" style="margin: 0 0 8px 0;">Members</div>
+        <div id="membersList"></div>
     </div>
 
     <div class="modal-overlay" id="serverModal">
@@ -225,37 +264,6 @@
         </div>
     </div>
 
-    <div class="modal-overlay" id="renameChannelModal">
-        <div class="modal">
-            <h3 style="margin-top:0;">Rename Channel</h3>
-            <input type="hidden" id="renameChannelId">
-            <label>Channel Name</label>
-            <input type="text" id="editChannelName">
-            <button class="modal-btn" onclick="saveChannelRename()">Save</button>
-            <button class="modal-btn" style="background:#4e5058; margin-top:6px;" onclick="closeRenameChannelModal()">Cancel</button>
-        </div>
-    </div>
-
-    <div class="modal-overlay" id="serverSettingsModal">
-        <div class="modal">
-            <div class="close-btn" onclick="closeServerSettingsModal()">✖</div>
-            <h3 style="margin-top:0;">Server Settings</h3>
-            
-            <label style="font-size:12px; font-weight:bold; color:#949ba4;">SERVER NAME</label>
-            <input type="text" id="editServerName">
-            <button class="modal-btn" onclick="saveServerSettings()" style="margin-bottom: 20px;">Save Name</button>
-            
-            <div style="border-top:1px solid #2b2d31; padding-top:16px; margin-top:16px;">
-                <h4 style="margin:0 0 10px 0;">Members / Invites</h4>
-                <div id="serverMemberList" style="max-height: 180px; overflow-y: auto;"></div>
-            </div>
-
-            <div style="border-top:1px solid #2b2d31; padding-top:16px; margin-top:20px;">
-                <button class="modal-btn danger" onclick="deleteServer()">Delete Server</button>
-            </div>
-        </div>
-    </div>
-
     <div class="modal-overlay" id="profileModal">
         <div class="modal">
             <div class="close-btn" onclick="closeProfileModal()">✖</div>
@@ -264,7 +272,6 @@
     </div>
 
     <script>
-        // --- CONFIGURATION ---
         const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -274,37 +281,15 @@
         let activeTargetId = null;
         let activeServerObj = null;
         let myProfileData = null;
+        let activeReplyTo = null; // Currently selected message to reply to
+        let typingTimeout = null;
 
         const activeMessagesMap = new Map();
         const DEFAULT_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>";
-
-        // Notification Sound Setup
         const notifAudio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
 
-        // --- SIDEBAR RESIZING ---
-        const sidebar = document.getElementById('sidebar');
-        const resizer = document.getElementById('sidebarResizer');
-        let isResizing = false;
-
-        resizer.addEventListener('mousedown', () => {
-            isResizing = true;
-            resizer.classList.add('resizing');
-            document.body.style.cursor = 'col-resize';
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizing) return;
-            let newWidth = e.clientX - 72;
-            if (newWidth >= 160 && newWidth <= 400) sidebar.style.width = newWidth + 'px';
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (isResizing) {
-                isResizing = false;
-                resizer.classList.remove('resizing');
-                document.body.style.cursor = 'default';
-            }
-        });
+        // Broadcast channel for typing events
+        let broadcastChannel = null;
 
         // --- AUTH & INIT ---
         async function checkAuth() {
@@ -316,6 +301,7 @@
             loadServers();
             showDMView();
             listenRealtime();
+            setupTypingEvents();
         }
 
         async function loadMyProfileData() {
@@ -327,19 +313,45 @@
             }
         }
 
-        // --- NAVIGATION & SERVERS ---
+        // --- TYPING INDICATORS ---
+        function setupTypingEvents() {
+            const input = document.getElementById('messageInput');
+            input.addEventListener('input', () => {
+                if (!activeTargetId || !broadcastChannel) return;
+                broadcastChannel.send({
+                    type: 'broadcast',
+                    event: 'typing',
+                    payload: { username: myProfileData?.username || 'Someone', userId: currentUser.id }
+                });
+            });
+        }
+
+        function initBroadcastChannel(channelKey) {
+            if (broadcastChannel) supabaseClient.removeChannel(broadcastChannel);
+            broadcastChannel = supabaseClient.channel(`room_${channelKey}`);
+
+            broadcastChannel.on('broadcast', { event: 'typing' }, (payload) => {
+                if (payload.payload.userId === currentUser.id) return;
+                const indicator = document.getElementById('typingIndicator');
+                indicator.textContent = `${payload.payload.username} is typing...`;
+                
+                clearTimeout(typingTimeout);
+                typingTimeout = setTimeout(() => { indicator.textContent = ''; }, 2500);
+            }).subscribe();
+        }
+
+        // --- SERVERS & DMs ---
         async function loadServers() {
             const { data: myMemberships } = await supabaseClient.from('server_members').select('server_id').eq('user_id', currentUser.id);
             const myServerIds = (myMemberships || []).map(m => m.server_id);
-
             const { data: servers } = await supabaseClient.from('servers').select('*');
+            
             const container = document.getElementById('serversList');
             container.innerHTML = '';
 
             if (servers) {
-                const accessibleServers = servers.filter(srv => !srv.is_private || srv.owner_id === currentUser.id || myServerIds.includes(srv.id));
-
-                accessibleServers.forEach(srv => {
+                const accessible = servers.filter(srv => !srv.is_private || srv.owner_id === currentUser.id || myServerIds.includes(srv.id));
+                accessible.forEach(srv => {
                     const btn = document.createElement('div');
                     btn.className = `rail-btn ${activeServerObj?.id === srv.id ? 'active' : ''}`;
                     btn.textContent = srv.name.substring(0, 2).toUpperCase();
@@ -352,8 +364,8 @@
 
         async function showDMView() {
             activeMode = 'DM'; activeServerObj = null; activeTargetId = null;
+            cancelReply();
             document.getElementById('sidebarHeader').textContent = 'Direct Messages';
-            document.getElementById('serverSettingsBtn').style.display = 'none';
             document.getElementById('sectionLabel').textContent = 'Friends / Users';
             document.getElementById('addChannelBtn').style.display = 'none';
             document.getElementById('chatHeader').textContent = 'Select a friend to DM';
@@ -372,28 +384,29 @@
                     container.appendChild(div);
                 });
             }
+            loadMembersList(users || []);
             loadServers();
         }
 
         function selectDM(user, e) {
             activeTargetId = user.id;
+            cancelReply();
             document.getElementById('chatHeader').textContent = `@ ${user.username}`;
             document.querySelectorAll('#sidebarList .item-btn').forEach(btn => btn.classList.remove('active'));
             if (e && e.currentTarget) e.currentTarget.classList.add('active');
+            
+            initBroadcastChannel(`dm_${[currentUser.id, user.id].sort().join('_')}`);
             loadDMMessages();
         }
 
         async function selectServer(server) {
             activeMode = 'SERVER'; activeServerObj = server; activeTargetId = null;
+            cancelReply();
             document.getElementById('sidebarHeader').textContent = server.name;
             document.getElementById('sectionLabel').textContent = 'Channels';
             
             const isOwner = server.owner_id === currentUser.id;
             document.getElementById('addChannelBtn').style.display = isOwner ? 'inline' : 'none';
-            document.getElementById('serverSettingsBtn').style.display = isOwner ? 'inline' : 'none';
-
-            document.getElementById('chatHeader').textContent = 'Select a channel';
-            document.getElementById('messagesBox').innerHTML = '<div style="text-align:center; color:#949ba4; margin-top:20px;">Select a channel to view messages.</div>';
 
             const { data: channels } = await supabaseClient.from('channels').select('*').eq('server_id', server.id);
             const container = document.getElementById('sidebarList');
@@ -403,15 +416,7 @@
                 channels.forEach((ch, index) => {
                     const div = document.createElement('div');
                     div.className = `item-btn`;
-                    div.innerHTML = `
-                        <span># ${escapeHTML(ch.name)}</span>
-                        ${isOwner ? `
-                            <div class="item-actions">
-                                <span class="item-action-icon" onclick="event.stopPropagation(); openRenameChannelModal('${ch.id}', '${escapeHTML(ch.name)}')" title="Rename Channel">⚙️</span>
-                                <span class="item-action-icon" onclick="event.stopPropagation(); deleteChannel('${ch.id}')" title="Delete Channel">🗑️</span>
-                            </div>
-                        ` : ''}
-                    `;
+                    div.innerHTML = `<span># ${escapeHTML(ch.name)}</span>`;
                     div.onclick = () => {
                         document.querySelectorAll('#sidebarList .item-btn').forEach(b => b.classList.remove('active'));
                         div.classList.add('active');
@@ -420,54 +425,20 @@
                     container.appendChild(div);
                     if (index === 0) { div.classList.add('active'); selectChannel(ch); }
                 });
-            } else {
-                container.innerHTML = '<div style="font-size:12px; color:#949ba4; padding:8px;">No channels yet.</div>';
             }
+            loadServerMembers(server.id);
             loadServers();
         }
 
         function selectChannel(ch) {
             activeTargetId = ch.id;
+            cancelReply();
             document.getElementById('chatHeader').textContent = `# ${ch.name}`;
+            initBroadcastChannel(`channel_${ch.id}`);
             loadChannelMessages();
         }
 
-        // --- CHANNEL MANAGEMENT ---
-        function openCreateChannelModal() { document.getElementById('channelModal').style.display = 'flex'; }
-        function closeChannelModal() { document.getElementById('channelModal').style.display = 'none'; }
-
-        async function createNewChannel() {
-            const input = document.getElementById('newChannelName');
-            const name = input.value.trim();
-            if (!name || !activeServerObj) return;
-            await supabaseClient.from('channels').insert([{ server_id: activeServerObj.id, name: name.toLowerCase().replace(/\s+/g, '-') }]);
-            input.value = '';
-            closeChannelModal();
-            selectServer(activeServerObj);
-        }
-
-        function openRenameChannelModal(chId, oldName) {
-            document.getElementById('renameChannelId').value = chId;
-            document.getElementById('editChannelName').value = oldName;
-            document.getElementById('renameChannelModal').style.display = 'flex';
-        }
-        function closeRenameChannelModal() { document.getElementById('renameChannelModal').style.display = 'none'; }
-
-        async function saveChannelRename() {
-            const chId = document.getElementById('renameChannelId').value;
-            const newName = document.getElementById('editChannelName').value.trim();
-            if (!newName || !chId) return;
-            await supabaseClient.from('channels').update({ name: newName.toLowerCase().replace(/\s+/g, '-') }).eq('id', chId);
-            closeRenameChannelModal();
-            selectServer(activeServerObj);
-        }
-
-        async function deleteChannel(chId) {
-            await supabaseClient.from('channels').delete().eq('id', chId);
-            selectServer(activeServerObj);
-        }
-
-        // --- MESSAGES (LOAD / RENDER / EDIT / DELETE) ---
+        // --- MESSAGES RENDER & REPLIES ---
         async function loadDMMessages() {
             if (!activeTargetId) return;
             const { data } = await supabaseClient.from('direct_messages').select(`*, profiles:sender_id (username, avatar_base64)`).in('sender_id', [currentUser.id, activeTargetId]).in('receiver_id', [currentUser.id, activeTargetId]).order('created_at', { ascending: true });
@@ -485,12 +456,7 @@
             box.innerHTML = '';
             activeMessagesMap.clear();
 
-            if (msgs.length === 0) { 
-                box.innerHTML = '<div style="text-align:center; color:#949ba4; margin-top:20px;">No messages here yet. Say hi!</div>'; 
-                return; 
-            }
-
-            const myUsername = myProfileData?.username?.toLowerCase() || '';
+            if (msgs.length === 0) { box.innerHTML = '<div style="text-align:center; color:#949ba4; margin-top:20px;">No messages here yet. Say hi!</div>'; return; }
 
             msgs.forEach(m => {
                 const msgIdStr = String(m.id);
@@ -501,21 +467,27 @@
                 const avatar = m.profiles?.avatar_base64 || DEFAULT_AVATAR;
                 const time = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-                const isMentioned = myUsername && m.content.toLowerCase().includes(`@${myUsername}`);
-                
                 const isAuthor = pId === currentUser.id;
-                const isServerOwner = activeServerObj && activeServerObj.owner_id === currentUser.id;
-                const canDelete = isAuthor || isServerOwner;
-                const canEdit = isAuthor;
+                const canDelete = isAuthor || (activeServerObj && activeServerObj.owner_id === currentUser.id);
+
+                let replyBlock = '';
+                if (m.reply_to_user && m.reply_to_text) {
+                    replyBlock = `
+                        <div class="msg-reply-preview">
+                            <span class="msg-reply-author">@${escapeHTML(m.reply_to_user)}</span>: ${escapeHTML(m.reply_to_text)}
+                        </div>
+                    `;
+                }
 
                 let formattedContent = escapeHTML(m.content).replace(/@(\w+)/g, '<span class="mention-tag">@$1</span>');
 
                 const div = document.createElement('div');
-                div.className = `message ${isMentioned ? 'mentioned' : ''}`;
+                div.className = `message`;
                 div.id = `msg-row-${msgIdStr}`;
                 div.innerHTML = `
                     <img class="msg-avatar" src="${avatar}" onclick="openProfileModal('${pId}')" title="View Profile">
                     <div style="flex:1;">
+                        ${replyBlock}
                         <div>
                             <span class="msg-username" onclick="openProfileModal('${pId}')">${escapeHTML(username)}</span>
                             <span class="msg-time">${time}</span>
@@ -523,32 +495,46 @@
                         </div>
                         <div class="msg-text" id="msg-text-${msgIdStr}">${formattedContent}</div>
                     </div>
-                    ${(canEdit || canDelete) ? `
-                        <div class="msg-actions">
-                            ${canEdit ? `<div class="msg-action-btn" onclick="startInlineEdit('${msgIdStr}')">✏️ Edit</div>` : ''}
-                            ${canDelete ? `<div class="msg-action-btn delete" onclick="deleteMessage('${msgIdStr}')">🗑️ Delete</div>` : ''}
-                        </div>
-                    ` : ''}
+                    <div class="msg-actions">
+                        <div class="msg-action-btn" onclick="startReply('${msgIdStr}')">↩️ Reply</div>
+                        ${isAuthor ? `<div class="msg-action-btn" onclick="startInlineEdit('${msgIdStr}')">✏️ Edit</div>` : ''}
+                        ${canDelete ? `<div class="msg-action-btn delete" onclick="deleteMessage('${msgIdStr}')">🗑️ Delete</div>` : ''}
+                    </div>
                 `;
                 box.appendChild(div);
             });
             box.scrollTop = box.scrollHeight;
         }
 
-        function startInlineEdit(msgId) {
-            const msgIdStr = String(msgId);
+        // --- REPLY ACTIONS ---
+        function startReply(msgIdStr) {
             const msgObj = activeMessagesMap.get(msgIdStr);
+            if (!msgObj) return;
 
-            if (!msgObj) {
-                console.error('Could not find message in memory for ID:', msgIdStr);
-                return;
-            }
+            activeReplyTo = {
+                id: msgIdStr,
+                username: msgObj.profiles?.username || 'User',
+                text: msgObj.content
+            };
 
+            document.getElementById('replyTargetUser').textContent = `@${activeReplyTo.username}`;
+            document.getElementById('replyBar').style.display = 'flex';
+            document.querySelector('.input-wrapper').classList.add('has-reply');
+            document.getElementById('messageInput').focus();
+        }
+
+        function cancelReply() {
+            activeReplyTo = null;
+            document.getElementById('replyBar').style.display = 'none';
+            document.querySelector('.input-wrapper').classList.remove('has-reply');
+        }
+
+        // --- INLINE EDIT & DELETE ---
+        function startInlineEdit(msgIdStr) {
+            const msgObj = activeMessagesMap.get(msgIdStr);
+            if (!msgObj) return;
             const textElem = document.getElementById(`msg-text-${msgIdStr}`);
-            if (!textElem) {
-                console.error('Could not find text element for ID:', `msg-text-${msgIdStr}`);
-                return;
-            }
+            if (!textElem) return;
 
             textElem.innerHTML = `
                 <div class="edit-box-wrapper">
@@ -559,11 +545,9 @@
                     </div>
                 </div>
             `;
-
             const input = document.getElementById(`edit-input-${msgIdStr}`);
             if (input) {
                 input.focus();
-                input.selectionStart = input.selectionEnd = input.value.length;
                 input.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') saveInlineEdit(msgIdStr);
                     if (e.key === 'Escape') cancelInlineEdit(msgIdStr);
@@ -571,56 +555,28 @@
             }
         }
 
-        function cancelInlineEdit(msgId) {
-            const msgIdStr = String(msgId);
+        function cancelInlineEdit(msgIdStr) {
             const msgObj = activeMessagesMap.get(msgIdStr);
             if (!msgObj) return;
             const textElem = document.getElementById(`msg-text-${msgIdStr}`);
-            if (textElem) {
-                textElem.innerHTML = escapeHTML(msgObj.content).replace(/@(\w+)/g, '<span class="mention-tag">@$1</span>');
-            }
+            if (textElem) textElem.innerHTML = escapeHTML(msgObj.content).replace(/@(\w+)/g, '<span class="mention-tag">@$1</span>');
         }
 
-        async function saveInlineEdit(msgId) {
-            const msgIdStr = String(msgId);
+        async function saveInlineEdit(msgIdStr) {
             const input = document.getElementById(`edit-input-${msgIdStr}`);
             if (!input) return;
-
             const newContent = input.value.trim();
-            const msgObj = activeMessagesMap.get(msgIdStr);
-
             if (!newContent) return;
-            if (newContent === msgObj.content) {
-                cancelInlineEdit(msgIdStr);
-                return;
-            }
 
             const table = activeMode === 'DM' ? 'direct_messages' : 'messages';
-            
-            let res = await supabaseClient.from(table).update({ content: newContent, is_edited: true }).eq('id', msgId).select();
-            if (res.error) {
-                console.warn('Fallback update without is_edited flag...', res.error);
-                res = await supabaseClient.from(table).update({ content: newContent }).eq('id', msgId).select();
-            }
-
-            if (res.error) {
-                console.error('Error editing message:', res.error);
-                return;
-            }
-
+            await supabaseClient.from(table).update({ content: newContent, is_edited: true }).eq('id', msgIdStr);
             if (activeMode === 'DM') loadDMMessages();
             else loadChannelMessages();
         }
 
-        async function deleteMessage(msgId) {
-            const msgIdStr = String(msgId);
+        async function deleteMessage(msgIdStr) {
             const table = activeMode === 'DM' ? 'direct_messages' : 'messages';
-            const { error } = await supabaseClient.from(table).delete().eq('id', msgIdStr);
-            if (error) {
-                console.error('Error deleting message:', error);
-                return;
-            }
-            
+            await supabaseClient.from(table).delete().eq('id', msgIdStr);
             if (activeMode === 'DM') loadDMMessages();
             else loadChannelMessages();
         }
@@ -633,190 +589,59 @@
             if (!text || !activeTargetId) return;
             input.value = '';
 
+            const payload = {
+                content: text,
+                reply_to_user: activeReplyTo?.username || null,
+                reply_to_text: activeReplyTo?.text || null
+            };
+
+            cancelReply();
+
             if (activeMode === 'DM') {
-                await supabaseClient.from('direct_messages').insert([{ sender_id: currentUser.id, receiver_id: activeTargetId, content: text }]);
+                await supabaseClient.from('direct_messages').insert([{ ...payload, sender_id: currentUser.id, receiver_id: activeTargetId }]);
                 loadDMMessages();
             } else {
-                await supabaseClient.from('messages').insert([{ profile_id: currentUser.id, channel_id: activeTargetId, content: text }]);
+                await supabaseClient.from('messages').insert([{ ...payload, profile_id: currentUser.id, channel_id: activeTargetId }]);
                 loadChannelMessages();
             }
         });
 
-        // --- SERVER SETTINGS MODAL & PRIVATE SERVER INVITATIONS ---
-        async function openServerSettingsModal() {
-            if (!activeServerObj) return;
-            document.getElementById('editServerName').value = activeServerObj.name;
-            document.getElementById('serverSettingsModal').style.display = 'flex';
-            loadServerMembersList();
-        }
-
-        function closeServerSettingsModal() {
-            document.getElementById('serverSettingsModal').style.display = 'none';
-        }
-
-        async function saveServerSettings() {
-            const newName = document.getElementById('editServerName').value.trim();
-            if (!newName) return;
-            await supabaseClient.from('servers').update({ name: newName }).eq('id', activeServerObj.id);
-            activeServerObj.name = newName;
-            document.getElementById('sidebarHeader').textContent = newName;
-            closeServerSettingsModal();
-            loadServers();
-        }
-
-        async function deleteServer() {
-            await supabaseClient.from('servers').delete().eq('id', activeServerObj.id);
-            closeServerSettingsModal();
-            showDMView();
-        }
-
-        async function loadServerMembersList() {
-            const container = document.getElementById('serverMemberList');
-            container.innerHTML = '<div style="font-size:12px; color:#949ba4;">Loading users...</div>';
-
-            const { data: users } = await supabaseClient.from('profiles').select('*').neq('id', currentUser.id);
-            const { data: members } = await supabaseClient.from('server_members').select('user_id').eq('server_id', activeServerObj.id);
-            const memberIds = new Set((members || []).map(m => m.user_id));
-
+        // --- MEMBERS SIDEBAR ---
+        function loadMembersList(users) {
+            const container = document.getElementById('membersList');
             container.innerHTML = '';
-            if (users) {
-                users.forEach(u => {
-                    const isMember = memberIds.has(u.id);
-                    const div = document.createElement('div');
-                    div.className = 'member-item';
-                    div.innerHTML = `
-                        <div class="member-info">
-                            <img src="${u.avatar_base64 || DEFAULT_AVATAR}" style="width:28px; height:28px; border-radius:50%;">
-                            <span style="font-size:14px;">${escapeHTML(u.username || 'User')}</span>
-                        </div>
-                        <button class="sm-btn ${isMember ? 'remove' : 'add'}" onclick="toggleServerMember('${u.id}', ${isMember})">
-                            ${isMember ? 'Remove Access' : 'Add to Server'}
-                        </button>
-                    `;
-                    container.appendChild(div);
-                });
+            users.forEach(u => {
+                const div = document.createElement('div');
+                div.className = 'member-card';
+                div.onclick = () => openProfileModal(u.id);
+                div.innerHTML = `<img src="${u.avatar_base64 || DEFAULT_AVATAR}" style="width:24px; height:24px; border-radius:50%; object-fit:cover;"> ${escapeHTML(u.username || 'User')}`;
+                container.appendChild(div);
+            });
+        }
+
+        async function loadServerMembers(serverId) {
+            const { data: members } = await supabaseClient.from('server_members').select('user_id').eq('server_id', serverId);
+            const userIds = (members || []).map(m => m.user_id);
+            if (userIds.length > 0) {
+                const { data: users } = await supabaseClient.from('profiles').select('*').in('id', userIds);
+                loadMembersList(users || []);
             }
         }
 
-        async function toggleServerMember(userId, isMember) {
-            if (isMember) {
-                await supabaseClient.from('server_members').delete().eq('server_id', activeServerObj.id).eq('user_id', userId);
-            } else {
-                await supabaseClient.from('server_members').insert([{ server_id: activeServerObj.id, user_id: userId }]);
-            }
-            loadServerMembersList();
-        }
-
-        // --- REALTIME NOTIFICATIONS & LIVE MESSAGING ---
+        // --- REALTIME NOTIFICATIONS ---
         function listenRealtime() {
             supabaseClient.channel('realtime_chat_updates')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'direct_messages' }, (payload) => {
-                    if (payload.eventType === 'INSERT' && payload.new.sender_id !== currentUser.id) {
-                        triggerNotification('New Direct Message', payload.new.content);
-                    }
-                    if (activeMode === 'DM') loadDMMessages();
-                })
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
-                    if (payload.eventType === 'INSERT' && payload.new.profile_id !== currentUser.id) {
-                        triggerNotification('New Server Message', payload.new.content);
-                    }
-                    if (activeMode === 'SERVER') loadChannelMessages();
-                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'direct_messages' }, () => { if (activeMode === 'DM') loadDMMessages(); })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => { if (activeMode === 'SERVER') loadChannelMessages(); })
                 .subscribe();
         }
 
-        function triggerNotification(title, body) {
-            notifAudio.play().catch(() => {});
-            if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification(title, { body: body, icon: myProfileData?.avatar_base64 || DEFAULT_AVATAR });
-            }
-        }
-
-        // --- PROFILES & OTHER MODALS ---
-        async function openProfileModal(userId, forceEdit = false) {
-            const { data: profile } = await supabaseClient.from('profiles').select('*').eq('id', userId).single();
-            if (!profile) return;
-
-            const modal = document.getElementById('profileModal');
-            const content = document.getElementById('profileModalContent');
-            const avatar = profile.avatar_base64 || DEFAULT_AVATAR;
-            const bio = profile.bio || 'No bio yet.';
-
-            if (userId === currentUser.id && forceEdit) {
-                content.innerHTML = `
-                    <h3 style="margin-top:0;">Edit Profile</h3>
-                    <div class="profile-header">
-                        <img src="${avatar}" class="profile-avatar-lg" id="editAvatarPreview">
-                        <label style="color:#5865f2; cursor:pointer; font-size:12px; margin-top:8px;">
-                            Change Avatar (Click)
-                            <input type="file" id="editAvatarFile" style="display:none" accept="image/*" onchange="previewAvatar(event)">
-                        </label>
-                    </div>
-                    <label style="font-size:12px; font-weight:bold; color:#949ba4;">USERNAME</label>
-                    <input type="text" id="editUsername" value="${escapeHTML(profile.username || '')}">
-                    <label style="font-size:12px; font-weight:bold; color:#949ba4;">ABOUT ME</label>
-                    <textarea id="editBio" rows="3" style="resize:none;">${escapeHTML(bio)}</textarea>
-                    <button class="modal-btn" onclick="saveProfile()">Save Changes</button>
-                `;
-            } else {
-                content.innerHTML = `
-                    <div class="profile-header" style="margin-top:10px;">
-                        <img src="${avatar}" class="profile-avatar-lg">
-                        <div class="profile-name-lg">${escapeHTML(profile.username || 'User')}</div>
-                    </div>
-                    <div style="background:#1e1f22; padding:12px; border-radius:8px; margin-bottom:16px;">
-                        <div style="font-size:12px; font-weight:bold; color:#949ba4; margin-bottom:4px;">ABOUT ME</div>
-                        <div style="font-size:14px; line-height:1.4;">${escapeHTML(bio)}</div>
-                    </div>
-                `;
-            }
-            modal.style.display = 'flex';
-        }
-
-        function closeProfileModal() { document.getElementById('profileModal').style.display = 'none'; }
-
-        function previewAvatar(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                document.getElementById('editAvatarPreview').src = e.target.result;
-                document.getElementById('editAvatarPreview').dataset.base64 = e.target.result;
-            };
-            reader.readAsDataURL(file);
-        }
-
-        async function saveProfile() {
-            const username = document.getElementById('editUsername').value.trim();
-            const bio = document.getElementById('editBio').value.trim();
-            const previewImg = document.getElementById('editAvatarPreview');
-            const avatar_base64 = previewImg.dataset.base64 || previewImg.src;
-
-            await supabaseClient.from('profiles').update({ username, bio, avatar_base64 }).eq('id', currentUser.id);
-            await loadMyProfileData();
-            closeProfileModal();
-            if (activeMode === 'DM') showDMView();
-        }
-
-        function escapeHTML(str) {
-            return (str || '').replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
-        }
-
+        // --- HELPERS & MODALS ---
+        function escapeHTML(str) { return (str || '').replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)); }
         function openCreateServerModal() { document.getElementById('serverModal').style.display = 'flex'; }
         function closeServerModal() { document.getElementById('serverModal').style.display = 'none'; }
-        
-        async function createNewServer() {
-            const name = document.getElementById('newServerName').value.trim();
-            const isPrivate = document.getElementById('newServerPrivate').checked;
-            if (!name) return;
-            const { data: srv } = await supabaseClient.from('servers').insert([{ name, is_private: isPrivate, owner_id: currentUser.id }]).select().single();
-            if (srv) { 
-                await supabaseClient.from('channels').insert([{ server_id: srv.id, name: 'general' }]); 
-                closeServerModal(); 
-                loadServers(); 
-                selectServer(srv); 
-            }
-        }
+        function openProfileModal(userId) { document.getElementById('profileModal').style.display = 'flex'; }
+        function closeProfileModal() { document.getElementById('profileModal').style.display = 'none'; }
 
         checkAuth();
     </script>
