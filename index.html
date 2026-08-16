@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
+    <title>OpenHub</title>
+    <style>
+        /* CSS Variables for Light / Dark Mode */
+        :root {
+            --bg-color: #f4f4f9;
+            --text-color: #333;
+            --text-muted: #666;
+            --container-bg: white;
+            --border-color: #ccc;
+            --input-bg: white;
+            --navbar-bg: #1a1a1a;
+            --navbar-text: white;
+            --shadow-color: rgba(0,0,0,0.1);
+            --shadow-hover: rgba(0,0,0,0.15);
+            --dropdown-border: #eee;
+        }
+
+        body.dark-mode {
+            --bg-color: #121212;
+            --text-color: #e0e0e0;
+            --text-muted: #aaa;
+            --container-bg: #1e1e1e;
+            --border-color: #444;
+            --input-bg: #2d2d2d;
+            --navbar-bg: #0a0a0a;
+            --navbar-text: #e0e0e0;
+            --shadow-color: rgba(0,0,0,0.5);
+            --shadow-hover: rgba(0,0,0,0.7);
+            --dropdown-border: #333;
+        }
+
+        /* Global Styles */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        /* Reusable UI */
+        .container {
+            max-width: 400px;
+            margin: 60px auto;
+            background: var(--container-bg);
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px var(--shadow-color);
+            transition: background-color 0.3s ease;
+        }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="email"], input[type="password"] {
+            width: 100%; padding: 10px; 
+            background-color: var(--input-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color); 
+            border-radius: 4px; box-sizing: border-box;
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+        }
+        .button-group { display: flex; gap: 10px; margin-top: 20px; }
+        button {
+            flex: 1; background-color: #3ECF8E; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; font-size: 16px;
+        }
+        button.secondary { background-color: #555; }
+        button:hover { opacity: 0.9; }
+        
+        #message {
+            margin-top: 20px; padding: 10px; border-radius: 4px; text-align: center; display: none;
+        }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+
+        /* App Layout (Navbar) */
+        #appSection { display: none; }
+        .navbar {
+            background-color: var(--navbar-bg); color: var(--navbar-text); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center;
+            transition: background-color 0.3s ease;
+        }
+        .navbar h1 { margin: 0; font-size: 24px; color: #3ECF8E; }
+        
+        .nav-controls {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        #themeToggleBtn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--navbar-text);
+            padding: 6px 12px;
+            font-size: 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        #themeToggleBtn:hover {
+            border-color: #3ECF8E;
+        }
+
+        /* Profile Dropdown */
+        .profile-menu { position: relative; }
+        .profile-icon {
+            width: 40px; height: 40px; border-radius: 50%; cursor: pointer; object-fit: cover; border: 2px solid #3ECF8E;
+        }
+        .dropdown {
+            display: none; position: absolute; right: 0; top: 50px; background: var(--container-bg); border-radius: 8px; box-shadow: 0 4px 12px var(--shadow-hover); width: 250px; padding: 20px; color: var(--text-color); z-index: 100;
+        }
+        .dropdown.active { display: block; }
+        .dropdown h4 { margin: 0 0 15px 0; border-bottom: 1px solid var(--dropdown-border); padding-bottom: 10px; }
+        .dropdown .form-group { margin-bottom: 10px; }
+        
+        /* Dashboard Windows Grid */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            padding: 40px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .window-card {
+            background: var(--container-bg);
+            border-radius: 8px;
+            padding: 25px;
+            box-shadow: 0 4px 6px var(--shadow-color);
+            text-decoration: none; /* Removes the underline from links */
+            color: var(--text-color);
+            transition: transform 0.2s, box-shadow 0.2s, background-color 0.3s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        .window-card:hover {
+            transform: translateY(-5px); /* Makes the card float up */
+            box-shadow: 0 8px 15px var(--shadow-hover);
+        }
+        .window-card h3 {
+            color: #3ECF8E;
+            margin-top: 0;
+            font-size: 22px;
+        }
+        .window-card p {
+            color: var(--text-muted);
+            margin-bottom: 0;
+            line-height: 1.4;
+        }
+
+        /* Sections */
+        #authSection { display: block; } 
+        #setupSection { display: none; }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+    <div id="authSection" class="container">
+        <h2 style="text-align: center; margin-bottom: 20px;">Welcome to OpenHub</h2>
+        <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="email" placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="password" placeholder="••••••••">
+        </div>
+        <div class="button-group">
+            <button id="loginBtn">Log In</button>
+            <button id="signupBtn" class="secondary">Sign Up</button>
+        </div>
+        <div id="authMessage" style="margin-top: 15px; text-align: center; color: red;"></div>
+    </div>
+
+    <div id="setupSection" class="container">
+        <h2 style="text-align: center;">Set Your Username</h2>
+        <p style="text-align: center; font-size: 14px; color: var(--text-muted);">You need a username before you can enter OpenHub.</p>
+        <div class="form-group">
+            <input type="text" id="newUsername" placeholder="e.g. CoolUser99">
+        </div>
+        <button id="saveUsernameBtn" style="width: 100%;">Save & Continue</button>
+        <div id="setupMessage" style="margin-top: 15px; text-align: center; color: red;"></div>
+    </div>
+
+    <div id="appSection">
+        <nav class="navbar">
+            <h1>OpenHub</h1>
+            <div class="nav-controls">
+                <button id="themeToggleBtn" onclick="toggleTheme()">
+                    <span id="themeIcon">🌙</span> <span id="themeText">Dark</span>
+                </button>
+                <div class="profile-menu">
+                    <img id="navProfileIcon" class="profile-icon" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'><path d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/></svg>">
+                    
+                    <div id="dropdownMenu" class="dropdown">
+                        <h4>Hello, <span id="displayUsername">User</span>!</h4>
+                        
+                        <div class="form-group">
+                            <label>Change Username</label>
+                            <input type="text" id="updateUsernameInput" placeholder="New username">
+                            <button id="updateUsernameBtn" style="margin-top: 5px; width: 100%; font-size: 14px;">Update</button>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 20px;">
+                            <label>Change Profile Picture</label>
+                            <input type="file" id="pfpUpload" accept="image/*" style="font-size: 12px; margin-bottom: 5px;">
+                        </div>
+
+                        <button id="logoutBtn" class="secondary" style="width: 100%; margin-top: 15px;">Sign Out</button>
+                        <div id="dropdownMessage" style="margin-top: 10px; font-size: 12px; color: red; text-align: center;"></div>
+                    </div>
+                </div>
+            </div>
+        </nav>
+        
+        <div class="dashboard-grid">
+            <a href="chat.html" class="window-card">
+                <h3>💬 Chat</h3>
+                <p>Jump into the global chat and talk with other OpenHub users.</p>
+            </a>
+
+            <a href="3D platformer game.html" class="window-card">
+                <h3>🎮 3D Platformer Game</h3>
+                <p>Jump into the 3D platformer game world, overcome obstacles, and reach the finish line.</p>
+            </a>
+
+            <a href="sparq.html" class="window-card">
+                <h3>⚡ Sparq</h3>
+                <p>A browser-based code editor with live preview, in-browser Python, and a color picker — all in one tab.</p>
+            </a>
+
+            <a href="bookmarkleter.html" class="window-card">
+                <h3>🔖 Bookmarkleter</h3>
+                <p>Turn any JavaScript snippet into a draggable bookmarklet — minify, IIFE-wrap, and jQuery-check included.</p>
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // --- 0. THEME LOGIC ---
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        if (currentTheme === 'dark') {
+            document.body.classList.add('dark-mode');
+            updateThemeUI('dark');
+        }
+
+        function toggleTheme() {
+            document.body.classList.toggle('dark-mode');
+            const isDark = document.body.classList.contains('dark-mode');
+            const theme = isDark ? 'dark' : 'light';
+            localStorage.setItem('theme', theme);
+            updateThemeUI(theme);
+        }
+
+        function updateThemeUI(theme) {
+            const themeIcon = document.getElementById('themeIcon');
+            const themeText = document.getElementById('themeText');
+            if (theme === 'dark') {
+                themeIcon.textContent = '☀️';
+                themeText.textContent = 'Light';
+            } else {
+                themeIcon.textContent = '🌙';
+                themeText.textContent = 'Dark';
+            }
+        }
+
+        // --- 1. CONFIGURATION ---
+        const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        let currentUser = null;
+        let userProfile = null;
+
+        // --- 2. HTML ELEMENTS ---
+        const authSection = document.getElementById('authSection');
+        const setupSection = document.getElementById('setupSection');
+        const appSection = document.getElementById('appSection');
+        
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const authMessage = document.getElementById('authMessage');
+        
+        const newUsernameInput = document.getElementById('newUsername');
+        const setupMessage = document.getElementById('setupMessage');
+        
+        const navProfileIcon = document.getElementById('navProfileIcon');
+        const dropdownMenu = document.getElementById('dropdownMenu');
+        const displayUsername = document.getElementById('displayUsername');
+        const updateUsernameInput = document.getElementById('updateUsernameInput');
+        const pfpUpload = document.getElementById('pfpUpload');
+        const dropdownMessage = document.getElementById('dropdownMessage');
+
+        // --- 3. CORE LOGIC: AUTH STATE CHANGE ---
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
+            if (session) {
+                currentUser = session.user;
+                await checkUserProfile();
+            } else {
+                currentUser = null;
+                userProfile = null;
+                showSection(authSection);
+            }
+        });
+
+        async function checkUserProfile() {
+            const { data, error } = await supabaseClient
+                .from('profiles')
+                .select('*')
+                .eq('id', currentUser.id)
+                .single();
+
+            if (data && data.username) {
+                userProfile = data;
+                displayUsername.textContent = userProfile.username;
+                updateUsernameInput.value = userProfile.username;
+                
+                if (userProfile.avatar_base64) {
+                    navProfileIcon.src = userProfile.avatar_base64;
+                }
+                showSection(appSection);
+            } else {
+                showSection(setupSection);
+            }
+        }
+
+        function showSection(section) {
+            authSection.style.display = 'none';
+            setupSection.style.display = 'none';
+            appSection.style.display = 'none';
+            section.style.display = 'block';
+        }
+
+        // --- 4. EVENT LISTENERS: AUTH ---
+        document.getElementById('signupBtn').addEventListener('click', async () => {
+            authMessage.textContent = "Loading...";
+            const { error } = await supabaseClient.auth.signUp({ 
+                email: emailInput.value, password: passwordInput.value 
+            });
+            authMessage.textContent = error ? error.message : "Check your email to confirm!";
+            authMessage.style.color = error ? "red" : "green";
+        });
+
+        document.getElementById('loginBtn').addEventListener('click', async () => {
+            authMessage.textContent = "Loading...";
+            const { error } = await supabaseClient.auth.signInWithPassword({ 
+                email: emailInput.value, password: passwordInput.value 
+            });
+            if (error) authMessage.textContent = error.message;
+        });
+
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            await supabaseClient.auth.signOut();
+            dropdownMenu.classList.remove('active');
+        });
+
+        // --- 5. EVENT LISTENERS: PROFILES ---
+        document.getElementById('saveUsernameBtn').addEventListener('click', async () => {
+            const username = newUsernameInput.value.trim();
+            if (!username) return setupMessage.textContent = "Username cannot be empty.";
+            
+            setupMessage.textContent = "Saving...";
+            const { error } = await supabaseClient.from('profiles').upsert({ 
+                id: currentUser.id, username: username 
+            });
+
+            if (error) {
+                setupMessage.textContent = error.message.includes('unique') ? "Username already taken." : error.message;
+            } else {
+                await checkUserProfile();
+            }
+        });
+
+        document.getElementById('updateUsernameBtn').addEventListener('click', async () => {
+            const newName = updateUsernameInput.value.trim();
+            if (!newName) return dropdownMessage.textContent = "Username cannot be empty.";
+            
+            dropdownMessage.textContent = "Updating...";
+            const { error } = await supabaseClient.from('profiles').upsert({ 
+                id: currentUser.id, 
+                username: newName,
+                avatar_base64: userProfile ? userProfile.avatar_base64 : null
+            });
+
+            if (error) {
+                dropdownMessage.textContent = error.message.includes('unique') ? "Username taken." : error.message;
+            } else {
+                dropdownMessage.textContent = "Updated successfully!";
+                dropdownMessage.style.color = "green";
+                await checkUserProfile();
+                setTimeout(() => dropdownMessage.textContent = "", 2000);
+            }
+        });
+
+        navProfileIcon.addEventListener('click', () => {
+            dropdownMenu.classList.toggle('active');
+        });
+
+        // --- 6. IMAGE COMPRESSION & BASE64 UPLOAD ---
+        pfpUpload.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            dropdownMessage.textContent = "Compressing image...";
+            dropdownMessage.style.color = "var(--text-color)";
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = async function() {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 200;
+                    const scaleSize = MAX_WIDTH / img.width;
+                    canvas.width = MAX_WIDTH;
+                    canvas.height = img.height * scaleSize;
+
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                    const base64Jpeg = canvas.toDataURL('image/jpeg', 0.8);
+
+                    dropdownMessage.textContent = "Saving to database...";
+
+                    const { error } = await supabaseClient.from('profiles').upsert({ 
+                        id: currentUser.id, 
+                        username: userProfile.username,
+                        avatar_base64: base64Jpeg 
+                    });
+
+                    if (error) {
+                        dropdownMessage.textContent = "Error: " + error.message;
+                        dropdownMessage.style.color = "red";
+                    } else {
+                        dropdownMessage.textContent = "Profile picture updated!";
+                        dropdownMessage.style.color = "green";
+                        await checkUserProfile();
+                        setTimeout(() => dropdownMessage.textContent = "", 2000);
+                    }
+                }
+                img.src = e.target.result;
+            }
+            reader.readAsDataURL(file);
+        });
+    </script>
+</body>
+</html>

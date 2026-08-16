@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sparq v1.0</title>
+
+<!-- CodeMirror 6: real, open-source code editor (syntax highlighting, line numbers, etc.) -->
+<!-- Using a single bundled build (codemirror + language packs) to avoid version-mismatch issues
+     between separately-resolved @codemirror/* sub-packages. -->
+<script type="importmap">
+{
+  "imports": {
+    "codemirror": "https://esm.sh/codemirror@6.0.1",
+    "@codemirror/state": "https://esm.sh/@codemirror/state@6.4.1",
+    "@codemirror/view": "https://esm.sh/@codemirror/view@6.26.3?deps=@codemirror/state@6.4.1",
+    "@codemirror/commands": "https://esm.sh/@codemirror/commands@6.6.0?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3",
+    "@codemirror/language": "https://esm.sh/@codemirror/language@6.10.1?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3",
+    "@codemirror/lang-html": "https://esm.sh/@codemirror/lang-html@6.4.9?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3,@codemirror/language@6.10.1",
+    "@codemirror/lang-css": "https://esm.sh/@codemirror/lang-css@6.2.1?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3,@codemirror/language@6.10.1",
+    "@codemirror/lang-javascript": "https://esm.sh/@codemirror/lang-javascript@6.2.2?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3,@codemirror/language@6.10.1",
+    "@codemirror/lang-python": "https://esm.sh/@codemirror/lang-python@6.1.6?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3,@codemirror/language@6.10.1",
+    "@codemirror/theme-one-dark": "https://esm.sh/@codemirror/theme-one-dark@6.1.2?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3,@codemirror/language@6.10.1",
+    "@codemirror/autocomplete": "https://esm.sh/@codemirror/autocomplete@6.16.3?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3,@codemirror/language@6.10.1",
+    "@codemirror/search": "https://esm.sh/@codemirror/search@6.5.6?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3"
+  }
+}
+</script>
+
+<!-- Pyodide: real, open-source CPython-in-WebAssembly runtime (used to execute .py files).
+     Loaded lazily inside a dedicated Web Worker (see the Pyodide section of the
+     module script below) so long-running or looping Python can't freeze the page. -->
+
+<link href="https://fonts.googleapis.com/css2?family=Arvo:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #16181d;
+    --panel: #1c1f26;
+    --panel-alt: #21242c;
+    --border: #2f333e;
+    --text: #e9ebf1;
+    --muted: #9aa1b2;
+    --accent: #6ee7c8;
+    --accent-dark: #2f9c81;
+    --danger: #ff6b6b;
+    --radius: 8px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Arvo', Georgia, serif;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-size: 1.15rem;
+    margin: 0;
+    letter-spacing: 0.5px;
+  }
+
+  header .actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  button.btn {
+    font-family: inherit;
+    background: var(--panel-alt);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+
+  button.btn:hover { border-color: var(--accent-dark); }
+
+  button.btn.primary {
+    background: var(--accent);
+    color: #10221c;
+    border-color: var(--accent-dark);
+    font-weight: bold;
+  }
+
+  #body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+
+  /* ---------- Sidebar ---------- */
+  #sidebar {
+    width: 210px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .sidebar-section {
+    padding: 0.75rem 0.6rem 0.25rem;
+  }
+
+  .sidebar-title {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    padding: 0 0.4rem 0.4rem;
+  }
+
+  .file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 0.9rem;
+    gap: 0.4rem;
+  }
+
+  .file-item:hover { background: var(--panel-alt); }
+  .file-item.active { background: var(--panel-alt); color: var(--accent); }
+
+  .file-item .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-item .del {
+    opacity: 0.4;
+    font-size: 0.8rem;
+    padding: 0 0.2rem;
+  }
+  .file-item .del:hover { opacity: 1; color: var(--danger); }
+
+  .add-file-row {
+    display: flex;
+    gap: 0.3rem;
+    padding: 0.4rem;
+  }
+
+  .add-file-row input {
+    flex: 1;
+    min-width: 0;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 0.3rem 0.4rem;
+    font-size: 0.8rem;
+    font-family: inherit;
+  }
+
+  /* ---------- Editor / Preview split ---------- */
+  #workspace {
+    flex: 1;
+    display: flex;
+    min-width: 0;
+  }
+
+  #editor-pane, #preview-pane {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #editor-pane { border-right: 1px solid var(--border); }
+
+  #body.preview-maximized #sidebar,
+  #body.preview-maximized #editor-pane {
+    display: none;
+  }
+
+  #body.preview-maximized #preview-pane {
+    flex: 1 1 100%;
+  }
+
+  .pane-header {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .pane-header .maximize-btn {
+    font-family: inherit;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.72rem;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .pane-header .maximize-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent-dark);
+  }
+
+  #editor-host {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .cm-editor { height: 100%; font-size: 0.92rem; }
+  .cm-scroller { font-family: 'SFMono-Regular', Consolas, Menlo, monospace; }
+
+  /* Make the caret and selection clearly visible against the dark theme.
+     CodeMirror themes set cursor color via .cm-content, so we target with
+     high specificity and !important to guarantee it wins. */
+  #editor-host .cm-editor .cm-content .cm-cursor-primary,
+  #editor-host .cm-editor .cm-cursor,
+  #editor-host .cm-editor .cm-dropCursor {
+    border-left: 2px solid #ffd166 !important;
+    border-left-color: #ffd166 !important;
+  }
+
+  #editor-host .cm-editor .cm-selectionBackground,
+  #editor-host .cm-editor.cm-focused .cm-selectionBackground {
+    background: rgba(255, 209, 102, 0.25) !important;
+  }
+
+  #editor-host .cm-gutters {
+    background: var(--panel) !important;
+    color: var(--muted) !important;
+    border-right: 1px solid var(--border) !important;
+  }
+
+  #editor-host .cm-activeLineGutter {
+    background: var(--panel-alt) !important;
+    color: var(--accent) !important;
+  }
+
+  /* Inline color swatch shown before hex color literals in the editor */
+  .cm-color-swatch {
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 0.25em;
+    line-height: 0;
+  }
+
+  .cm-color-swatch-input {
+    width: 0.95em;
+    height: 0.95em;
+    padding: 0;
+    margin: 0;
+    border: 1px solid rgba(255,255,255,0.35);
+    border-radius: 3px;
+    cursor: pointer;
+    vertical-align: middle;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+    /* Remove default browser chrome around the color swatch so our own
+       border/shape shows instead of a platform-specific frame. */
+    appearance: none;
+    -webkit-appearance: none;
+    background-clip: content-box;
+  }
+
+  .cm-color-swatch-input::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+
+  .cm-color-swatch-input::-webkit-color-swatch {
+    border: none;
+    border-radius: 2px;
+  }
+
+  #preview-frame {
+    flex: 1;
+    border: none;
+    background: #fff;
+  }
+
+  #py-console {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    background: #0e1015;
+  }
+
+  #py-console.visible { display: flex; }
+  #py-console.visible ~ #preview-frame,
+  #preview-frame.hidden { display: none; }
+
+  #py-console-output {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.85rem 1rem;
+    font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #d8dde6;
+  }
+
+  #py-console-output .stderr { color: var(--danger); }
+  #py-console-output .stdout { color: #d8dde6; }
+  #py-console-output .system { color: var(--muted); font-style: italic; }
+
+  #py-console-status {
+    padding: 0.5rem 1rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #status-bar {
+    padding: 0.25rem 1rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <h1>Sparq v1.0</h1>
+    <div class="actions">
+      <button class="btn" id="download-btn">Download project</button>
+      <button class="btn primary" id="run-btn">▶ Run</button>
+    </div>
+  </header>
+
+  <div id="body">
+    <aside id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-title">Files</div>
+        <div id="file-list"></div>
+        <div class="add-file-row">
+          <input type="text" id="new-file-name" placeholder="new-file.js">
+          <button class="btn" id="add-file-btn">+</button>
+        </div>
+      </div>
+    </aside>
+
+    <div id="workspace">
+      <div id="editor-pane">
+        <div class="pane-header" id="editor-filename">index.html</div>
+        <div id="editor-host"></div>
+      </div>
+      <div id="preview-pane">
+        <div class="pane-header" id="preview-pane-header-row">
+          <span id="preview-pane-header">Live Preview</span>
+          <button type="button" class="maximize-btn" id="maximize-btn">⤢ Fill page</button>
+        </div>
+        <iframe id="preview-frame" sandbox="allow-scripts allow-modals allow-forms allow-popups"></iframe>
+        <div id="py-console">
+          <div id="py-console-output"></div>
+          <div id="py-console-status">Pyodide not loaded yet — it loads automatically the first time you run a .py file.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status-bar">Ready.</div>
+</div>
+
+<script type="module">
+import { EditorState, Compartment } from "@codemirror/state";
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, Decoration, WidgetType, ViewPlugin } from "@codemirror/view";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching } from "@codemirror/language";
+import { html } from "@codemirror/lang-html";
+import { css } from "@codemirror/lang-css";
+import { javascript } from "@codemirror/lang-javascript";
+import { python } from "@codemirror/lang-python";
+import { oneDark } from "@codemirror/theme-one-dark";
+import { autocompletion, closeBrackets } from "@codemirror/autocomplete";
+import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+
+// ---------------- File model ----------------
+
+const DEFAULT_FILES = {
+  "index.html": {
+    lang: "html",
+    content:
+`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>My Project</title>
+</head>
+<body>
+  <h1>Hello, world!</h1>
+  <p>Edit index.html, style.css, and script.js, then hit Run.</p>
+</body>
+</html>
+`
+  },
+  "style.css": {
+    lang: "css",
+    content:
+`body {
+  font-family: sans-serif;
+  background: #fafafa;
+  color: #222;
+  padding: 2rem;
+}
+
+h1 {
+  color: #2f9c81;
+}
+`
+  },
+  "script.js": {
+    lang: "js",
+    content:
+`console.log("script.js loaded");
+
+document.addEventListener("DOMContentLoaded", () => {
+  const heading = document.querySelector("h1");
+  if (heading) {
+    heading.addEventListener("click", () => {
+      alert("You clicked the heading!");
+    });
+  }
+});
+`
+  },
+  "main.py": {
+    lang: "py",
+    content:
+`# Python runs in-browser via Pyodide, in a background worker so
+# infinite loops or long-running code won't freeze the page.
+# Switch to this file and hit Run to execute it in the console panel.
+# Hit Run again (now labeled Stop) to force-kill a running script.
+
+print("Hello from Python!")
+
+for i in range(5):
+    print(f"count: {i}")
+
+# Note: because Python runs in a worker, there's no DOM access here
+# (no 'import js' / document access) — that's the trade-off for a
+# script that can never lock up the page.
+`
+  }
+};
+
+const state = {
+  files: JSON.parse(JSON.stringify(DEFAULT_FILES)),
+  activeFile: "index.html",
+  editorView: null,
+  languageCompartment: new Compartment(),
+  pyWorker: null,
+  pyWorkerReady: null,
+  pyBusy: false,
+};
+
+function langExtensionFor(filename) {
+  if (filename.endsWith(".html") || filename.endsWith(".htm")) return html();
+  if (filename.endsWith(".css")) return css();
+  if (filename.endsWith(".py")) return python();
+  return javascript();
+}
+
+function langKeyFor(filename) {
+  if (filename.endsWith(".html") || filename.endsWith(".htm")) return "html";
+  if (filename.endsWith(".css")) return "css";
+  if (filename.endsWith(".py")) return "py";
+  return "js";
+}
+
+function isPythonFile(filename) {
+  return filename.endsWith(".py");
+}
+
+// ---------------- Color swatch / picker extension ----------------
+// Detects hex color literals (#fff, #ffffff, #ffffffaa) in the document,
+// renders a small clickable swatch right before each one, and opens a
+// native <input type="color"> so the user can adjust it — the picker
+// writes the new hex value straight back into the document text.
+
+const HEX_COLOR_RE = /#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
+
+function normalizeHexToFullForm(hex) {
+  // Expand #abc / #abcd to #aabbcc / #aabbccdd; pass through 6/8-digit as-is.
+  let h = hex.slice(1);
+  if (h.length === 3 || h.length === 4) {
+    h = h.split("").map((c) => c + c).join("");
+  }
+  // <input type="color"> only accepts #rrggbb (no alpha) — strip alpha for the picker value.
+  return "#" + h.slice(0, 6);
+}
+
+class ColorSwatchWidget extends WidgetType {
+  constructor(hexText, from, to) {
+    super();
+    this.hexText = hexText;
+    this.from = from;
+    this.to = to;
+  }
+
+  eq(other) {
+    return other.hexText === this.hexText && other.from === this.from && other.to === this.to;
+  }
+
+  toDOM(view) {
+    const wrap = document.createElement("span");
+    wrap.className = "cm-color-swatch";
+    wrap.title = "Click to adjust " + this.hexText;
+
+    const picker = document.createElement("input");
+    picker.type = "color";
+    picker.value = normalizeHexToFullForm(this.hexText);
+    picker.className = "cm-color-swatch-input";
+    // Make the swatch color visible even where the input's own rendering
+    // is inconsistent across browsers.
+    picker.style.background = this.hexText;
+
+    // Only write into the document on "change" (fires once the picker is
+    // dismissed/committed). Writing on "input" (fires continuously while
+    // dragging inside the picker) would trigger a doc change on every tick,
+    // which rebuilds all color-swatch widgets and yanks the native picker's
+    // <input> out of the DOM mid-drag — closing it unexpectedly.
+    picker.addEventListener("input", () => {
+      picker.style.background = picker.value;
+    });
+
+    picker.addEventListener("change", () => {
+      const newHex = picker.value; // always #rrggbb from the native picker
+      const tr = view.state.update({
+        changes: { from: this.from, to: this.to, insert: newHex },
+      });
+      view.dispatch(tr);
+    });
+
+    // Stop CodeMirror from treating this as a text-editing click (which can
+    // otherwise steal focus/caret placement before the native picker opens).
+    picker.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+    });
+
+    wrap.appendChild(picker);
+    return wrap;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+function buildColorDecorations(view) {
+  const widgets = [];
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.doc.sliceString(from, to);
+    HEX_COLOR_RE.lastIndex = 0;
+    let match;
+    while ((match = HEX_COLOR_RE.exec(text))) {
+      const start = from + match.index;
+      const end = start + match[0].length;
+      const deco = Decoration.widget({
+        widget: new ColorSwatchWidget(match[0], start, end),
+        side: -1,
+      });
+      widgets.push(deco.range(start));
+    }
+  }
+  return Decoration.set(widgets, true);
+}
+
+const colorSwatchViewPlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.decorations = buildColorDecorations(view);
+    }
+    update(update) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildColorDecorations(update.view);
+      }
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+  }
+);
+
+// ---------------- Editor setup ----------------
+
+function buildExtensions(filename) {
+  return [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightActiveLine(),
+    history(),
+    indentOnInput(),
+    bracketMatching(),
+    closeBrackets(),
+    autocompletion(),
+    highlightSelectionMatches(),
+    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+    oneDark,
+    langExtensionFor(filename),
+    colorSwatchViewPlugin,
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        state.files[state.activeFile].content = update.state.doc.toString();
+        scheduleRun();
+      }
+    }),
+    EditorView.theme({ "&": { height: "100%" } }),
+  ];
+}
+
+function createEditor() {
+  const startState = EditorState.create({
+    doc: state.files[state.activeFile].content,
+    extensions: buildExtensions(state.activeFile),
+  });
+
+  state.editorView = new EditorView({
+    state: startState,
+    parent: document.getElementById("editor-host"),
+  });
+}
+
+function switchToFile(filename) {
+  if (!state.files[filename]) return;
+  state.activeFile = filename;
+  document.getElementById("editor-filename").textContent = filename;
+
+  const newState = EditorState.create({
+    doc: state.files[filename].content,
+    extensions: buildExtensions(filename),
+  });
+  state.editorView.setState(newState);
+
+  renderFileList();
+  updatePaneForActiveFile();
+}
+
+// ---------------- File list UI ----------------
+
+function renderFileList() {
+  const list = document.getElementById("file-list");
+  list.innerHTML = "";
+  Object.keys(state.files).forEach((filename) => {
+    const item = document.createElement("div");
+    item.className = "file-item" + (filename === state.activeFile ? " active" : "");
+    item.addEventListener("click", () => switchToFile(filename));
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = filename;
+
+    item.appendChild(name);
+
+    // Any file can be deleted as long as it isn't the last one left.
+    if (Object.keys(state.files).length > 1) {
+      const del = document.createElement("span");
+      del.className = "del";
+      del.textContent = "✕";
+      del.title = "Delete file";
+      del.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteFile(filename);
+      });
+      item.appendChild(del);
+    }
+
+    list.appendChild(item);
+  });
+}
+
+function deleteFile(filename) {
+  if (Object.keys(state.files).length <= 1) return;
+  delete state.files[filename];
+  if (state.activeFile === filename) {
+    const remaining = Object.keys(state.files);
+    switchToFile(remaining[0]);
+  } else {
+    renderFileList();
+  }
+  updatePaneForActiveFile();
+  scheduleRun();
+}
+
+function addFile() {
+  const input = document.getElementById("new-file-name");
+  let name = input.value.trim();
+  if (!name) return;
+  if (!/\.(html|htm|css|js|py)$/i.test(name)) name += ".js";
+  if (state.files[name]) {
+    setStatus(`File "${name}" already exists.`);
+    return;
+  }
+  const lang = langKeyFor(name);
+  const boilerplate = lang === "html" ? "<!-- new HTML fragment -->\n" :
+                       lang === "css" ? "/* new styles */\n" :
+                       lang === "py" ? "# new Python script\n" :
+                       "// new script\n";
+  state.files[name] = { lang, content: boilerplate };
+  input.value = "";
+  switchToFile(name);
+  scheduleRun();
+}
+
+document.getElementById("add-file-btn").addEventListener("click", addFile);
+document.getElementById("new-file-name").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") addFile();
+});
+
+// ---------------- Live preview ----------------
+
+function buildPreviewDocument() {
+  const htmlFiles = Object.entries(state.files).filter(([n]) => n.endsWith(".html") || n.endsWith(".htm"));
+  const cssFiles = Object.entries(state.files).filter(([n]) => n.endsWith(".css"));
+  const jsFiles = Object.entries(state.files).filter(([n]) => n.endsWith(".js"));
+
+  let baseHtml = htmlFiles.length
+    ? (state.files["index.html"] ? state.files["index.html"].content : htmlFiles[0][1].content)
+    : "<!DOCTYPE html><html><head></head><body></body></html>";
+
+  const styleTag = cssFiles.map(([, f]) => `<style>\n${f.content}\n</style>`).join("\n");
+  const scriptTag = jsFiles.map(([, f]) => `<script>\n${f.content}\n<\/script>`).join("\n");
+
+  // Inject CSS before </head>, JS before </body> (fallback: append at end)
+  if (/<\/head>/i.test(baseHtml)) {
+    baseHtml = baseHtml.replace(/<\/head>/i, styleTag + "\n</head>");
+  } else {
+    baseHtml = styleTag + "\n" + baseHtml;
+  }
+
+  if (/<\/body>/i.test(baseHtml)) {
+    baseHtml = baseHtml.replace(/<\/body>/i, scriptTag + "\n</body>");
+  } else {
+    baseHtml += "\n" + scriptTag;
+  }
+
+  return baseHtml;
+}
+
+let runHandle = null;
+function scheduleRun() {
+  // Python only executes on an explicit Run click — auto-running arbitrary
+  // code on every keystroke (with real side effects, DOM access, etc.) is
+  // surprising and can run mid-edit while syntax is incomplete. Live preview
+  // for HTML/CSS/JS is unaffected.
+  if (isPythonFile(state.activeFile)) return;
+  if (runHandle) clearTimeout(runHandle);
+  runHandle = setTimeout(runActive, 350);
+}
+
+function runActive() {
+  if (isPythonFile(state.activeFile)) {
+    runPython(state.activeFile);
+  } else {
+    runPreview();
+  }
+}
+
+function runPreview() {
+  const doc = buildPreviewDocument();
+  const frame = document.getElementById("preview-frame");
+  frame.srcdoc = doc;
+  setStatus("Preview updated at " + new Date().toLocaleTimeString());
+}
+
+document.getElementById("run-btn").addEventListener("click", () => {
+  if (state.pyBusy) {
+    stopPython();
+  } else {
+    runActive();
+  }
+});
+
+function setStatus(msg) {
+  document.getElementById("status-bar").textContent = msg;
+}
+
+// ---------------- Preview "fill page" toggle ----------------
+
+const maximizeBtn = document.getElementById("maximize-btn");
+const bodyEl = document.getElementById("body");
+let previewMaximized = false;
+
+function setPreviewMaximized(on) {
+  previewMaximized = on;
+  bodyEl.classList.toggle("preview-maximized", on);
+  maximizeBtn.textContent = on ? "⤡ Restore" : "⤢ Fill page";
+  maximizeBtn.title = on ? "Show editor and file list again" : "Expand preview to fill the page";
+}
+
+maximizeBtn.addEventListener("click", () => setPreviewMaximized(!previewMaximized));
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && previewMaximized) setPreviewMaximized(false);
+});
+
+// ---------------- Pane switching (HTML preview vs Python console) ----------------
+
+function updatePaneForActiveFile() {
+  const frame = document.getElementById("preview-frame");
+  const consoleEl = document.getElementById("py-console");
+  const header = document.getElementById("preview-pane-header");
+
+  if (isPythonFile(state.activeFile)) {
+    frame.classList.add("hidden");
+    consoleEl.classList.add("visible");
+    header.textContent = "Python Console (" + state.activeFile + ")";
+  } else {
+    frame.classList.remove("hidden");
+    consoleEl.classList.remove("visible");
+    header.textContent = "Live Preview";
+  }
+}
+
+// ---------------- Pyodide (Python runtime) ----------------
+//
+// Python runs inside a dedicated Web Worker instead of on the main thread.
+// Pyodide executes Python synchronously, so a script with a loop (even an
+// intentional `while True: ... sleep(...)`) used to freeze the entire page —
+// no repaints, no clicks, nothing — because it blocked the same thread the
+// UI runs on. Running it in a worker keeps the page responsive no matter
+// what the script does, and lets a "Stop" button hard-kill it.
+//
+// Trade-off: workers have no DOM, so `import js; js.document...` (DOM
+// access from Python) no longer works. There's no safe way to keep that
+// and also guarantee the page can't be frozen.
+
+const pyConsoleOutput = document.getElementById("py-console-output");
+const pyConsoleStatus = document.getElementById("py-console-status");
+const runBtn = document.getElementById("run-btn");
+
+// currentLineEl tracks the in-progress output line so streamed text
+// (e.g. one digit at a time, no newline) appends onto the same visual
+// line instead of each chunk getting its own <div> — matching how a
+// real terminal displays output written without trailing newlines.
+let currentLineEl = null;
+
+function pyAppend(text, kind) {
+  if (!text) return;
+  const parts = text.split("\n");
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i]) {
+      if (!currentLineEl) {
+        currentLineEl = document.createElement("div");
+        pyConsoleOutput.appendChild(currentLineEl);
+      }
+      const span = document.createElement("span");
+      span.className = kind || "stdout";
+      span.textContent = parts[i];
+      currentLineEl.appendChild(span);
+    }
+    if (i < parts.length - 1) {
+      if (!currentLineEl) {
+        currentLineEl = document.createElement("div");
+        pyConsoleOutput.appendChild(currentLineEl);
+      }
+      currentLineEl = null; // newline hit — next content starts a fresh line
+    }
+  }
+  pyConsoleOutput.scrollTop = pyConsoleOutput.scrollHeight;
+}
+
+// For one-off status/error messages ("Running...", "Finished.", tracebacks).
+// Always starts on its own fresh line, even mid-stream.
+function pyBlock(text, kind) {
+  currentLineEl = null;
+  pyAppend(text + "\n", kind);
+}
+
+function pyClear() {
+  pyConsoleOutput.innerHTML = "";
+  currentLineEl = null;
+}
+
+const PYODIDE_WORKER_SRC = `
+self.pyodidePromise = null;
+
+function ensurePyodide() {
+  if (!self.pyodidePromise) {
+    self.pyodidePromise = (async () => {
+      importScripts("https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js");
+      if (typeof loadPyodide !== "function") {
+        throw new Error("Pyodide script did not load (check network/CDN access).");
+      }
+      const pyodide = await loadPyodide();
+
+      // Use the "raw" (byte-level) stdout/stderr handlers instead of the
+      // default line-batched ones. The batched handler only calls back
+      // once a full line (ending in "\\n") has been written — a script
+      // that writes output without newlines (e.g. one character at a
+      // time, like a typewriter/progress effect) would never trigger it
+      // at all, so nothing would ever show up in the console even though
+      // the script is running correctly. Raw mode fires on every byte,
+      // so output appears exactly as it's written, matching a real
+      // terminal. TextDecoder with stream:true handles multi-byte UTF-8
+      // characters split across separate byte callbacks correctly.
+      const stdoutDecoder = new TextDecoder();
+      const stderrDecoder = new TextDecoder();
+      pyodide.setStdout({
+        raw: (byte) => {
+          const text = stdoutDecoder.decode(new Uint8Array([byte]), { stream: true });
+          if (text) postMessage({ type: "stdout", text });
+        },
+      });
+      pyodide.setStderr({
+        raw: (byte) => {
+          const text = stderrDecoder.decode(new Uint8Array([byte]), { stream: true });
+          if (text) postMessage({ type: "stderr", text });
+        },
+      });
+
+      return pyodide;
+    })();
+  }
+  return self.pyodidePromise;
+}
+
+self.onmessage = async (e) => {
+  const msg = e.data;
+  if (msg.type === "init") {
+    try {
+      await ensurePyodide();
+      postMessage({ type: "ready" });
+    } catch (err) {
+      postMessage({ type: "init-error", message: String(err && err.message || err) });
+    }
+  } else if (msg.type === "run") {
+    try {
+      const pyodide = await ensurePyodide();
+      await pyodide.runPythonAsync(msg.code);
+      postMessage({ type: "done" });
+    } catch (err) {
+      postMessage({ type: "error", message: String(err && err.message || err) });
+    }
+  }
+};
+`;
+
+let pyWorkerUrl = null;
+function getPyWorkerUrl() {
+  if (!pyWorkerUrl) {
+    const blob = new Blob([PYODIDE_WORKER_SRC], { type: "application/javascript" });
+    pyWorkerUrl = URL.createObjectURL(blob);
+  }
+  return pyWorkerUrl;
+}
+
+function setPyBusy(busy) {
+  state.pyBusy = busy;
+  runBtn.textContent = busy ? "■ Stop" : "▶ Run";
+  runBtn.title = busy ? "Stop the running Python script" : "";
+}
+
+function destroyPyWorker() {
+  if (state.pyWorker) {
+    state.pyWorker.terminate();
+    state.pyWorker = null;
+  }
+  state.pyWorkerReady = null;
+}
+
+// Hard-stops whatever Python is currently running (including an infinite
+// loop) by terminating the worker outright. There's no safe cooperative
+// interrupt available here, so this is a blunt kill — the next run pays
+// the cost of a fresh Pyodide load.
+function stopPython() {
+  destroyPyWorker();
+  setPyBusy(false);
+  pyBlock("Stopped.", "system");
+  pyConsoleStatus.textContent = "Stopped. Next run will reload Pyodide.";
+  setStatus("Python run stopped.");
+}
+
+function ensurePyWorker() {
+  if (state.pyWorkerReady) return state.pyWorkerReady;
+
+  const worker = new Worker(getPyWorkerUrl());
+  state.pyWorker = worker;
+  pyConsoleStatus.textContent = "Loading Pyodide (first run only, a few MB)...";
+
+  state.pyWorkerReady = new Promise((resolve, reject) => {
+    worker.onmessage = (e) => {
+      const msg = e.data;
+      if (msg.type === "stdout") pyAppend(msg.text, "stdout");
+      else if (msg.type === "stderr") pyAppend(msg.text, "stderr");
+      else if (msg.type === "ready") {
+        pyConsoleStatus.textContent = "Pyodide ready.";
+        resolve(worker);
+      } else if (msg.type === "init-error") {
+        pyConsoleStatus.textContent = "Failed to load Pyodide: " + msg.message;
+        pyBlock("Failed to load Pyodide: " + msg.message, "stderr");
+        destroyPyWorker();
+        reject(new Error(msg.message));
+      } else if (msg.type === "done") {
+        setPyBusy(false);
+        pyBlock("Finished.", "system");
+        setStatus(state.activeFile + " finished at " + new Date().toLocaleTimeString());
+      } else if (msg.type === "error") {
+        setPyBusy(false);
+        pyBlock(msg.message, "stderr");
+        setStatus(state.activeFile + " raised an error — see console panel.");
+      }
+    };
+    worker.onerror = (e) => {
+      pyConsoleStatus.textContent = "Worker error: " + e.message;
+      pyBlock("Worker error: " + e.message, "stderr");
+      destroyPyWorker();
+      reject(new Error(e.message));
+    };
+    worker.postMessage({ type: "init" });
+  });
+
+  return state.pyWorkerReady;
+}
+
+async function runPython(filename) {
+  if (!state.files[filename]) return;
+  pyClear();
+  pyBlock("Running " + filename + " ...", "system");
+  setStatus("Running " + filename + " ...");
+  setPyBusy(true);
+
+  let worker;
+  try {
+    worker = await ensurePyWorker();
+  } catch {
+    setPyBusy(false);
+    setStatus("Pyodide failed to load — see console panel.");
+    return;
+  }
+
+  worker.postMessage({ type: "run", code: state.files[filename].content });
+}
+
+// ---------------- Download project ----------------
+
+document.getElementById("download-btn").addEventListener("click", () => {
+  // Bundle everything into one self-contained HTML file for simplicity.
+  const doc = buildPreviewDocument();
+  const blob = new Blob([doc], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "project.html";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+// ---------------- Init ----------------
+
+try {
+  createEditor();
+  renderFileList();
+  updatePaneForActiveFile();
+  runPreview();
+} catch (err) {
+  console.error(err);
+  setStatus("Failed to initialize editor: " + err.message);
+}
+</script>
+
+</body>
+</html>

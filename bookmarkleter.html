@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookmarkleter</title>
+<link href="https://fonts.googleapis.com/css2?family=Arvo:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+
+<!-- Terser: a real, open-source, non-obfuscated JS minifier -->
+<script src="https://cdn.jsdelivr.net/npm/terser/dist/bundle.min.js"></script>
+
+<style>
+  :root {
+    --bg: #1b1d23;
+    --panel: #22252d;
+    --panel-alt: #262a33;
+    --border: #343947;
+    --text: #e9ebf1;
+    --muted: #9aa1b2;
+    --accent: #6ee7c8;
+    --accent-dark: #2f9c81;
+    --danger: #ff6b6b;
+    --radius: 10px;
+    font-size: 16px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Arvo', Georgia, serif;
+  }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2.5rem 1.25rem 4rem;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 0.25rem;
+  }
+
+  header h1 {
+    font-size: 2rem;
+    margin: 0;
+    letter-spacing: 0.5px;
+  }
+
+  .lede {
+    max-width: 640px;
+    text-align: center;
+    color: var(--muted);
+    line-height: 1.6;
+    margin: 0.75rem 0 2rem;
+  }
+
+  .lede a { color: var(--accent); }
+
+  main {
+    width: 100%;
+    max-width: 900px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  fieldset.options {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  fieldset.options legend {
+    padding: 0 0.5rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .opt-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
+
+  .opt-row input[type="checkbox"] {
+    margin-top: 0.28rem;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .opt-row label {
+    cursor: pointer;
+    line-height: 1.45;
+    font-size: 0.95rem;
+  }
+
+  .opt-row label a { color: var(--accent); }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .field label.field-label {
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 200px;
+    resize: vertical;
+    background: var(--panel-alt);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.9rem;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+
+  textarea:focus, input:focus { outline: 2px solid var(--accent-dark); outline-offset: 1px; }
+
+  textarea[readonly] { color: var(--muted); }
+
+  .error {
+    color: var(--danger);
+    font-size: 0.9rem;
+    min-height: 1.2em;
+  }
+
+  .output-link-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.95rem;
+  }
+
+  .bookmarklet-btn {
+    display: inline-block;
+    padding: 0.5rem 1.1rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #10221c;
+    font-weight: bold;
+    text-decoration: none;
+    cursor: grab;
+    border: 1px solid var(--accent-dark);
+  }
+
+  .bookmarklet-btn.disabled {
+    background: var(--panel-alt);
+    color: var(--muted);
+    border-color: var(--border);
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .size-note {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  .copy-btn {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent-dark);
+    border-radius: 999px;
+    padding: 0.4rem 0.9rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .copy-btn:hover { background: rgba(110,231,200,0.08); }
+
+  footer {
+    max-width: 640px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-top: 2.5rem;
+    line-height: 1.6;
+  }
+
+  footer a { color: var(--accent); }
+
+  @media (max-width: 560px) {
+    header h1 { font-size: 1.6rem; }
+    main { padding: 1.25rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Bookmarkleter</h1>
+</header>
+<p class="lede">
+  You have JavaScript. You need a
+  <a href="https://en.wikipedia.org/wiki/Bookmarklet" target="_blank" rel="noopener">bookmarklet</a>.
+  This does that.
+</p>
+
+<main>
+  <fieldset class="options">
+    <legend>Options</legend>
+
+    <div class="opt-row">
+      <input type="checkbox" id="opt-urlencode">
+      <label for="opt-urlencode">
+        URL-encode reserved characters: [space], %, ", &lt;, &gt;, #, @, &amp;, ?
+      </label>
+    </div>
+
+    <div class="opt-row">
+      <input type="checkbox" id="opt-iife">
+      <label for="opt-iife">
+        Wrap in an
+        <a href="https://en.wikipedia.org/wiki/Immediately_invoked_function_expression" target="_blank" rel="noopener">IIFE</a>
+        (anonymizing function).
+      </label>
+    </div>
+
+    <div class="opt-row">
+      <input type="checkbox" id="opt-minify">
+      <label for="opt-minify">
+        Minify using <a href="https://terser.org/" target="_blank" rel="noopener">Terser</a>.
+      </label>
+    </div>
+
+    <div class="opt-row">
+      <input type="checkbox" id="opt-jquery">
+      <label for="opt-jquery">
+        Make sure a modern version (&ge; 1.7) of
+        <a href="https://jquery.com" target="_blank" rel="noopener">jQuery</a>
+        is available for your code.
+      </label>
+    </div>
+  </fieldset>
+
+  <div class="field">
+    <label class="field-label" for="input">JavaScript</label>
+    <textarea id="input" spellcheck="false" placeholder="alert('Hello, world!');"></textarea>
+  </div>
+
+  <div class="error" id="error"></div>
+
+  <div class="field">
+    <label class="field-label" for="output">Bookmarklet source</label>
+    <textarea id="output" wrap="hard" readonly></textarea>
+  </div>
+
+  <div class="output-link-row">
+    <span>Drag this link to your bookmarks bar:</span>
+    <a id="output-link" class="bookmarklet-btn disabled" href="#">My Bookmarklet</a>
+    <button type="button" class="copy-btn" id="copy-btn">Copy</button>
+    <span class="size-note" id="size-note"></span>
+  </div>
+</main>
+
+<footer>
+  This is free software. It is released to the public domain without warranty.<br>
+  Minification powered by <a href="https://terser.org/" target="_blank" rel="noopener">Terser</a> —
+  a real, open-source, auditable JS minifier (no black-box code execution).
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var $input      = document.getElementById('input');
+  var $output      = document.getElementById('output');
+  var $outputLink   = document.getElementById('output-link');
+  var $error       = document.getElementById('error');
+  var $sizeNote    = document.getElementById('size-note');
+  var $copyBtn     = document.getElementById('copy-btn');
+
+  var $optUrlencode = document.getElementById('opt-urlencode');
+  var $optIife       = document.getElementById('opt-iife');
+  var $optMinify      = document.getElementById('opt-minify');
+  var $optJquery       = document.getElementById('opt-jquery');
+
+  // Characters javascript: URLs need escaped so browsers/bookmark managers
+  // don't mangle them.
+  var RESERVED_CHARS = /[ %"<>#@&?]/g;
+  var RESERVED_MAP = {
+    ' ': '%20', '%': '%25', '"': '%22', '<': '%3C',
+    '>': '%3E', '#': '%23', '@': '%40', '&': '%26', '?': '%3F'
+  };
+
+  function urlEncodeReserved(code) {
+    return code.replace(RESERVED_CHARS, function (ch) {
+      return RESERVED_MAP[ch];
+    });
+  }
+
+  function wrapIIFE(code) {
+    var trimmed = code.trim();
+    if (!trimmed) return code;
+    return '(function(){' + trimmed + '})();';
+  }
+
+  // Wraps the user's code in a function and only calls it once a modern
+  // jQuery (>= 1.7) is confirmed present — loading it first if needed.
+  // Firing the <script> tag and running the code immediately afterward
+  // (without waiting for the async load to finish) would throw on any
+  // jQuery/$ usage if it wasn't already on the page.
+  function withJQueryCheck(code) {
+    var versionOk =
+      'typeof jQuery!="undefined"&&(jQuery.fn.jquery.split(".")[0]>1||' +
+      '(jQuery.fn.jquery.split(".")[0]==1&&jQuery.fn.jquery.split(".")[1]>=7))';
+    return (
+      'function __bkRun(){' + code + '}' +
+      'if(' + versionOk + '){__bkRun();}else{' +
+      'var __bkS=document.createElement("script");' +
+      '__bkS.src="https://code.jquery.com/jquery-3.7.1.min.js";' +
+      '__bkS.onload=__bkRun;' +
+      'document.getElementsByTagName("head")[0].appendChild(__bkS);' +
+      '}'
+    );
+  }
+
+  var debounceHandle = null;
+
+  function scheduleUpdate() {
+    if (debounceHandle) clearTimeout(debounceHandle);
+    debounceHandle = setTimeout(updateBookmarklet, 150);
+  }
+
+  function setError(msg) {
+    $error.textContent = msg || '';
+  }
+
+  function setOutput(str) {
+    $output.value = str;
+    if (str) {
+      $outputLink.href = str;
+      $outputLink.classList.remove('disabled');
+      var bytes = new Blob([str]).size;
+      $sizeNote.textContent = bytes + ' characters';
+    } else {
+      $outputLink.href = '#';
+      $outputLink.classList.add('disabled');
+      $sizeNote.textContent = '';
+    }
+  }
+
+  function buildBookmarklet(rawCode) {
+    var code = rawCode;
+
+    if ($optJquery.checked) {
+      code = withJQueryCheck(code);
+    }
+
+    if ($optIife.checked) {
+      code = wrapIIFE(code);
+    }
+
+    return code;
+  }
+
+  function finish(code) {
+    var prefixed = 'javascript:' + code;
+    var finalStr = $optUrlencode.checked
+      ? urlEncodeReserved(prefixed)
+      : prefixed;
+    setOutput(finalStr);
+  }
+
+  function updateBookmarklet() {
+    var raw = $input.value;
+    setError('');
+
+    if (!raw.trim()) {
+      setOutput('');
+      return;
+    }
+
+    var code = buildBookmarklet(raw);
+
+    if ($optMinify.checked) {
+      if (typeof Terser === 'undefined' || typeof Terser.minify !== 'function') {
+        setError('Minifier script not loaded (check your network/CDN access) — showing unminified code.');
+        finish(code);
+        return;
+      }
+      Terser.minify(code, { compress: true, mangle: true })
+        .then(function (result) {
+          if (result.error) {
+            setError('Minify error: ' + result.error.message);
+            finish(code);
+            return;
+          }
+          finish(result.code || code);
+        })
+        .catch(function (err) {
+          setError('Minify error: ' + err.message);
+          finish(code);
+        });
+    } else {
+      finish(code);
+    }
+  }
+
+  [$input, $optUrlencode, $optIife, $optMinify, $optJquery].forEach(function (el) {
+    el.addEventListener('input', scheduleUpdate);
+    el.addEventListener('change', scheduleUpdate);
+  });
+
+  $copyBtn.addEventListener('click', function () {
+    if (!$output.value) return;
+    navigator.clipboard.writeText($output.value).then(function () {
+      var original = $copyBtn.textContent;
+      $copyBtn.textContent = 'Copied!';
+      setTimeout(function () { $copyBtn.textContent = original; }, 1200);
+    });
+  });
+
+  // Prevent an accidental click navigating the page when there's no output yet.
+  $outputLink.addEventListener('click', function (e) {
+    if (!$output.value) e.preventDefault();
+  });
+
+  updateBookmarklet();
+})();
+</script>
+
+</body>
+</html>
