@@ -340,6 +340,38 @@
   #py-console-output .stderr { color: var(--danger); }
   #py-console-output .stdout { color: #d8dde6; }
   #py-console-output .system { color: var(--muted); font-style: italic; }
+  #py-console-output .repl-echo { color: #7c8393; }
+
+  #py-console-input-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 1rem;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #py-console-prompt {
+    font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+    font-size: 0.85rem;
+    color: var(--accent);
+    flex-shrink: 0;
+    user-select: none;
+  }
+
+  #py-console-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #d8dde6;
+    font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+    font-size: 0.85rem;
+  }
+
+  #py-console-input::placeholder { color: var(--muted); }
+  #py-console-input:disabled { color: var(--muted); }
 
   #py-console-status {
     padding: 0.5rem 1rem;
@@ -395,7 +427,11 @@
         <iframe id="preview-frame" sandbox="allow-scripts allow-modals allow-forms allow-popups"></iframe>
         <div id="py-console">
           <div id="py-console-output"></div>
-          <div id="py-console-status">Pyodide not loaded yet — it loads automatically the first time you run a .py file.</div>
+          <div id="py-console-input-row">
+            <span id="py-console-prompt">&gt;&gt;&gt;</span>
+            <input type="text" id="py-console-input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type Python and press Enter...">
+          </div>
+          <div id="py-console-status">Pyodide not loaded yet — it loads automatically the first time you run a .py file, or the first time you type something here.</div>
         </div>
       </div>
     </div>
@@ -918,6 +954,12 @@ function pyClear() {
 const PYODIDE_WORKER_SRC = `
 self.pyodidePromise = null;
 
+// Sets up Pyodide plus a persistent interactive console (Python's own
+// pyodide.console.PyodideConsole — the same machinery Pyodide's own
+// browser REPL demo uses). Its globals dict is reused by "run" too, so
+// anything a script defines is available to type at the prompt right
+// after — variables and functions stick around between both, just like
+// running a script and then dropping into a normal Python console.
 function ensurePyodide() {
   if (!self.pyodidePromise) {
     self.pyodidePromise = (async () => {
@@ -927,16 +969,9 @@ function ensurePyodide() {
       }
       const pyodide = await loadPyodide();
 
-      // Use the "raw" (byte-level) stdout/stderr handlers instead of the
-      // default line-batched ones. The batched handler only calls back
-      // once a full line (ending in "\\n") has been written — a script
-      // that writes output without newlines (e.g. one character at a
-      // time, like a typewriter/progress effect) would never trigger it
-      // at all, so nothing would ever show up in the console even though
-      // the script is running correctly. Raw mode fires on every byte,
-      // so output appears exactly as it's written, matching a real
-      // terminal. TextDecoder with stream:true handles multi-byte UTF-8
-      // characters split across separate byte callbacks correctly.
+      // Raw (byte-level) handlers fire on every write, unlike the default
+      // line-batched ones which only fire on "\\n" — needed so output
+      // written without trailing newlines still shows up live.
       const stdoutDecoder = new TextDecoder();
       const stderrDecoder = new TextDecoder();
       pyodide.setStdout({
@@ -952,7 +987,33 @@ function ensurePyodide() {
         },
       });
 
-      return pyodide;
+      const ns = pyodide.globals.get("dict")();
+      await pyodide.runPythonAsync(\`
+import builtins
+from pyodide.console import PyodideConsole, repr_shorten
+import __main__
+pyconsole = PyodideConsole(__main__.__dict__)
+
+async def await_fut(fut):
+    res = await fut
+    if res is not None:
+        builtins._ = res
+        return repr_shorten(res)
+    return None
+
+def reset_buffer():
+    pyconsole.buffer = []
+\`, { globals: ns });
+
+      const awaitFut = ns.get("await_fut");
+      const pyconsole = ns.get("pyconsole");
+      const resetBuffer = ns.get("reset_buffer");
+      ns.destroy();
+
+      pyconsole.stdout_callback = (s) => postMessage({ type: "stdout", text: s });
+      pyconsole.stderr_callback = (s) => postMessage({ type: "stderr", text: s });
+
+      return { pyodide, pyconsole, awaitFut, resetBuffer };
     })();
   }
   return self.pyodidePromise;
@@ -969,12 +1030,44 @@ self.onmessage = async (e) => {
     }
   } else if (msg.type === "run") {
     try {
-      const pyodide = await ensurePyodide();
-      await pyodide.runPythonAsync(msg.code);
-      postMessage({ type: "done" });
+      const { pyodide, pyconsole } = await ensurePyodide();
+      // Runs into the SAME globals the interactive console uses.
+      await pyodide.runPythonAsync(msg.code, { globals: pyconsole.globals });
+      postMessage({ type: "run-result", id: msg.id, ok: true });
     } catch (err) {
-      postMessage({ type: "error", message: String(err && err.message || err) });
+      postMessage({ type: "run-result", id: msg.id, ok: false, message: String(err && err.message || err) });
     }
+  } else if (msg.type === "repl-line") {
+    try {
+      const { pyconsole, awaitFut } = await ensurePyodide();
+      const fut = pyconsole.push(msg.line);
+      const check = fut.syntax_check;
+      if (check === "syntax-error") {
+        fut.destroy();
+        postMessage({ type: "repl-result", id: msg.id, status: "error", message: "SyntaxError: invalid syntax" });
+        return;
+      }
+      if (check === "incomplete") {
+        fut.destroy();
+        postMessage({ type: "repl-result", id: msg.id, status: "incomplete" });
+        return;
+      }
+      try {
+        const repr = await awaitFut(fut);
+        postMessage({ type: "repl-result", id: msg.id, status: "complete", repr: repr === undefined ? null : repr });
+      } catch (err) {
+        postMessage({ type: "repl-result", id: msg.id, status: "error", message: String(err && err.message || err) });
+      } finally {
+        fut.destroy();
+      }
+    } catch (err) {
+      postMessage({ type: "repl-result", id: msg.id, status: "error", message: String(err && err.message || err) });
+    }
+  } else if (msg.type === "repl-reset") {
+    try {
+      const { resetBuffer } = await ensurePyodide();
+      resetBuffer();
+    } catch {}
   }
 };
 `;
@@ -992,6 +1085,20 @@ function setPyBusy(busy) {
   state.pyBusy = busy;
   runBtn.textContent = busy ? "■ Stop" : "▶ Run";
   runBtn.title = busy ? "Stop the running Python script" : "";
+  replInput.disabled = busy;
+}
+
+// Matches outgoing worker requests ("run", "repl-line") to their reply
+// ("run-result", "repl-result") by id, since REPL lines are submitted
+// one at a time and each needs its own response.
+let nextRequestId = 1;
+const pendingRequests = new Map();
+function sendWorkerRequest(worker, message) {
+  return new Promise((resolve) => {
+    const id = nextRequestId++;
+    pendingRequests.set(id, resolve);
+    worker.postMessage(Object.assign({}, message, { id }));
+  });
 }
 
 function destroyPyWorker() {
@@ -1000,15 +1107,21 @@ function destroyPyWorker() {
     state.pyWorker = null;
   }
   state.pyWorkerReady = null;
+  // Any run/repl call still waiting on the old worker will never hear
+  // back now that it's dead — resolve them so nothing hangs forever.
+  pendingRequests.forEach((resolve) => resolve({ ok: false, status: "error", message: "Stopped." }));
+  pendingRequests.clear();
 }
 
 // Hard-stops whatever Python is currently running (including an infinite
 // loop) by terminating the worker outright. There's no safe cooperative
 // interrupt available here, so this is a blunt kill — the next run pays
-// the cost of a fresh Pyodide load.
+// the cost of a fresh Pyodide load, and the interactive console's
+// variables are gone (a fresh one is created next time).
 function stopPython() {
   destroyPyWorker();
   setPyBusy(false);
+  replSetContinuing(false);
   pyBlock("Stopped.", "system");
   pyConsoleStatus.textContent = "Stopped. Next run will reload Pyodide.";
   setStatus("Python run stopped.");
@@ -1024,24 +1137,26 @@ function ensurePyWorker() {
   state.pyWorkerReady = new Promise((resolve, reject) => {
     worker.onmessage = (e) => {
       const msg = e.data;
-      if (msg.type === "stdout") pyAppend(msg.text, "stdout");
-      else if (msg.type === "stderr") pyAppend(msg.text, "stderr");
-      else if (msg.type === "ready") {
+      if (msg.type === "stdout") { pyAppend(msg.text, "stdout"); return; }
+      if (msg.type === "stderr") { pyAppend(msg.text, "stderr"); return; }
+      if (msg.type === "ready") {
         pyConsoleStatus.textContent = "Pyodide ready.";
         resolve(worker);
-      } else if (msg.type === "init-error") {
+        return;
+      }
+      if (msg.type === "init-error") {
         pyConsoleStatus.textContent = "Failed to load Pyodide: " + msg.message;
         pyBlock("Failed to load Pyodide: " + msg.message, "stderr");
         destroyPyWorker();
         reject(new Error(msg.message));
-      } else if (msg.type === "done") {
-        setPyBusy(false);
-        pyBlock("Finished.", "system");
-        setStatus(state.activeFile + " finished at " + new Date().toLocaleTimeString());
-      } else if (msg.type === "error") {
-        setPyBusy(false);
-        pyBlock(msg.message, "stderr");
-        setStatus(state.activeFile + " raised an error — see console panel.");
+        return;
+      }
+      if (msg.type === "run-result" || msg.type === "repl-result") {
+        const pending = pendingRequests.get(msg.id);
+        if (pending) {
+          pendingRequests.delete(msg.id);
+          pending(msg);
+        }
       }
     };
     worker.onerror = (e) => {
@@ -1059,6 +1174,7 @@ function ensurePyWorker() {
 async function runPython(filename) {
   if (!state.files[filename]) return;
   pyClear();
+  replSetContinuing(false);
   pyBlock("Running " + filename + " ...", "system");
   setStatus("Running " + filename + " ...");
   setPyBusy(true);
@@ -1072,8 +1188,102 @@ async function runPython(filename) {
     return;
   }
 
-  worker.postMessage({ type: "run", code: state.files[filename].content });
+  const result = await sendWorkerRequest(worker, { type: "run", code: state.files[filename].content });
+  setPyBusy(false);
+  if (result.ok) {
+    pyBlock("Finished.", "system");
+    setStatus(filename + " finished at " + new Date().toLocaleTimeString());
+  } else {
+    pyBlock(result.message, "stderr");
+    setStatus(filename + " raised an error — see console panel.");
+  }
 }
+
+// ---------------- Interactive REPL input ----------------
+//
+// Lets you type Python directly into the console, like a normal
+// interactive interpreter: variables persist between lines (and with
+// whatever the last Run left behind), multi-line blocks (def/for/if/...)
+// are detected automatically and continue on "..." until complete, and
+// Up/Down browse through what you've typed this session.
+
+const replInput = document.getElementById("py-console-input");
+const replPromptEl = document.getElementById("py-console-prompt");
+
+let replContinuing = false;
+let replBusy = false;
+let replHistory = [];
+let replHistoryIndex = -1;
+
+function replSetContinuing(continuing) {
+  replContinuing = continuing;
+  replPromptEl.textContent = continuing ? "..." : ">>>";
+}
+
+async function replSubmit() {
+  if (replBusy) return;
+  const line = replInput.value;
+  if (!line && !replContinuing) return; // ignore a bare empty Enter at top level
+
+  replBusy = true;
+  replInput.disabled = true;
+  pyAppend((replContinuing ? "... " : ">>> ") + line + "\n", "repl-echo");
+  if (line) {
+    replHistory.push(line);
+  }
+  replHistoryIndex = -1;
+  replInput.value = "";
+
+  try {
+    const worker = await ensurePyWorker();
+    const result = await sendWorkerRequest(worker, { type: "repl-line", line });
+    if (result.status === "incomplete") {
+      replSetContinuing(true);
+    } else if (result.status === "complete") {
+      replSetContinuing(false);
+      if (result.repr != null) pyAppend(result.repr + "\n", "stdout");
+    } else {
+      replSetContinuing(false);
+      pyAppend((result.message || "Error") + "\n", "stderr");
+      worker.postMessage({ type: "repl-reset" });
+    }
+  } catch (err) {
+    replSetContinuing(false);
+    pyAppend(String(err) + "\n", "stderr");
+  } finally {
+    replBusy = false;
+    replInput.disabled = state.pyBusy; // stays disabled if a file Run is in flight
+    if (!replInput.disabled) replInput.focus();
+  }
+}
+
+replInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    replSubmit();
+  } else if (e.key === "ArrowUp") {
+    if (!replHistory.length) return;
+    e.preventDefault();
+    replHistoryIndex = replHistoryIndex === -1 ? replHistory.length - 1 : Math.max(0, replHistoryIndex - 1);
+    replInput.value = replHistory[replHistoryIndex];
+  } else if (e.key === "ArrowDown") {
+    if (replHistoryIndex === -1) return;
+    e.preventDefault();
+    if (replHistoryIndex < replHistory.length - 1) {
+      replHistoryIndex++;
+      replInput.value = replHistory[replHistoryIndex];
+    } else {
+      replHistoryIndex = -1;
+      replInput.value = "";
+    }
+  } else if (e.key === "Escape" && replContinuing) {
+    e.preventDefault();
+    replInput.value = "";
+    replSetContinuing(false);
+    pyBlock("(cleared)", "system");
+    ensurePyWorker().then((worker) => worker.postMessage({ type: "repl-reset" }));
+  }
+});
 
 // ---------------- Download project ----------------
 
