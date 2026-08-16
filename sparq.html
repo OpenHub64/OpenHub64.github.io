@@ -1225,6 +1225,16 @@ async function replSubmit() {
   const line = replInput.value;
   if (!line && !replContinuing) return; // ignore a bare empty Enter at top level
 
+  // Shell-style conveniences, not Python — handled locally so they don't
+  // hit the interpreter as undefined names.
+  if (!replContinuing && (line.trim() === "cls" || line.trim() === "clear")) {
+    replHistory.push(line);
+    replHistoryIndex = -1;
+    replInput.value = "";
+    pyClear();
+    return;
+  }
+
   replBusy = true;
   replInput.disabled = true;
   pyAppend((replContinuing ? "... " : ">>> ") + line + "\n", "repl-echo");
