@@ -218,6 +218,7 @@
 <body>
 
 <header>
+  <a href="index.html" style="position:absolute;left:1.25rem;top:2.5rem;text-decoration:none;color:var(--accent);border:1px solid var(--accent-dark);border-radius:999px;padding:0.35rem 0.9rem;font-size:0.85rem;font-family:inherit;">⌂ Home</a>
   <h1>Bookmarkleter</h1>
 </header>
 <p class="lede">
@@ -227,6 +228,11 @@
 </p>
 
 <main>
+  <div class="field">
+    <label class="field-label" for="bk-name">Bookmarklet name</label>
+    <input type="text" id="bk-name" placeholder="My Bookmarklet" style="background:var(--panel-alt);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);padding:0.6rem 0.9rem;font-family:inherit;font-size:0.95rem;width:100%;">
+  </div>
+
   <fieldset class="options">
     <legend>Options</legend>
 
@@ -293,7 +299,9 @@
 (function () {
   "use strict";
 
+  var $nameInput   = document.getElementById('bk-name');
   var $input      = document.getElementById('input');
+
   var $output      = document.getElementById('output');
   var $outputLink   = document.getElementById('output-link');
   var $error       = document.getElementById('error');
@@ -358,17 +366,25 @@
 
   function setOutput(str) {
     $output.value = str;
+    var name = $nameInput.value.trim() || 'My Bookmarklet';
     if (str) {
       $outputLink.href = str;
+      $outputLink.textContent = name;
       $outputLink.classList.remove('disabled');
       var bytes = new Blob([str]).size;
       $sizeNote.textContent = bytes + ' characters';
     } else {
       $outputLink.href = '#';
+      $outputLink.textContent = name;
       $outputLink.classList.add('disabled');
       $sizeNote.textContent = '';
     }
   }
+
+  $nameInput.addEventListener('input', function () {
+    var name = $nameInput.value.trim() || 'My Bookmarklet';
+    $outputLink.textContent = name;
+  });
 
   function buildBookmarklet(rawCode) {
     var code = rawCode;
