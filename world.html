@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenHub World</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #1b1d23;
+    --panel: #22252d;
+    --border: #343947;
+    --text: #e9ebf1;
+    --muted: #9aa1b2;
+    --accent: #6ee7c8;
+    --accent-dark: #2f9c81;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: Arial, sans-serif;
+    height: 100%;
+  }
+  body {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 1.5rem 1rem 2.5rem;
+  }
+  header {
+    width: 100%; max-width: 900px;
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+  header h1 { font-size: 1.4rem; margin: 0; }
+  a.home-btn {
+    text-decoration: none; color: var(--accent);
+    border: 1px solid var(--accent-dark); border-radius: 999px;
+    padding: 0.35rem 0.9rem; font-size: 0.85rem;
+  }
+  #status { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.75rem; }
+  #gameWrap {
+    position: relative;
+    width: 100%; max-width: 900px;
+  }
+  canvas {
+    display: block; width: 100%; height: auto;
+    background: #10131a;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    image-rendering: pixelated;
+    touch-action: none;
+  }
+  #loginGate {
+    max-width: 400px; width: 100%;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.5rem; text-align: center;
+  }
+  #loginGate p { color: var(--muted); line-height: 1.5; }
+  #loginGate a { color: var(--accent); }
+  .hint {
+    margin-top: 0.75rem; color: var(--muted); font-size: 0.85rem; text-align: center;
+  }
+  #playerCount {
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="index.html" class="home-btn">⌂ Home</a>
+  <h1>🕹️ OpenHub World</h1>
+  <span style="width:60px"></span>
+</header>
+
+<div id="status">Connecting…</div>
+
+<div id="gameWrap" style="display:none;">
+  <canvas id="game" width="900" height="600"></canvas>
+</div>
+
+<div id="loginGate">
+  <p>You need to be signed in to enter the world.</p>
+  <p><a href="index.html">Sign in on OpenHub</a>, then come back here.</p>
+</div>
+
+<p class="hint">Move with <strong>WASD</strong> or <strong>Arrow Keys</strong>. Players online: <span id="playerCount">0</span></p>
+
+<script>
+(function () {
+  "use strict";
+
+  const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
+  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const $status = document.getElementById('status');
+  const $gameWrap = document.getElementById('gameWrap');
+  const $loginGate = document.getElementById('loginGate');
+  const $playerCount = document.getElementById('playerCount');
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  const WORLD_W = canvas.width;
+  const WORLD_H = canvas.height;
+  const PLAYER_SIZE = 24;
+  const SPEED = 220; // px per second
+  const SEND_INTERVAL_MS = 80;
+  const STALE_MS = 15000; // hide players not heard from in this long
+
+  let currentUser = null;
+  let myColor = '#6ee7c8';
+  let myUsername = 'Anon';
+
+  // local predicted position
+  let me = { x: WORLD_W / 2, y: WORLD_H / 2 };
+  const others = new Map(); // id -> { username, color, x, y, updated_at }
+
+  const keys = Object.create(null);
+  window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+  window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+  function randomColor(seed) {
+    const colors = ['#6ee7c8', '#ff6b6b', '#ffd166', '#6ea8ff', '#c792ea', '#ff9f6e', '#7ee787'];
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+    return colors[h % colors.length];
+  }
+
+  async function init() {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) {
+      $status.textContent = 'Not signed in.';
+      $loginGate.style.display = 'block';
+      return;
+    }
+
+    currentUser = session.user;
+    $loginGate.style.display = 'none';
+    $gameWrap.style.display = 'block';
+    $status.textContent = 'Loading your profile…';
+
+    const { data: profile } = await supabaseClient
+      .from('profiles')
+      .select('username')
+      .eq('id', currentUser.id)
+      .single();
+
+    myUsername = (profile && profile.username) ? profile.username : 'Anon';
+    myColor = randomColor(currentUser.id);
+    me.x = 100 + Math.random() * (WORLD_W - 200);
+    me.y = 100 + Math.random() * (WORLD_H - 200);
+
+    await supabaseClient.from('world_players').upsert({
+      id: currentUser.id,
+      username: myUsername,
+      color: myColor,
+      x: me.x,
+      y: me.y,
+      updated_at: new Date().toISOString()
+    });
+
+    const { data: existing } = await supabaseClient.from('world_players').select('*');
+    if (existing) {
+      existing.forEach((row) => {
+        if (row.id !== currentUser.id) {
+          others.set(row.id, row);
+        }
+      });
+    }
+
+    supabaseClient
+      .channel('world_players_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'world_players' }, (payload) => {
+        if (payload.eventType === 'DELETE') {
+          others.delete(payload.old.id);
+          return;
+        }
+        const row = payload.new;
+        if (row.id === currentUser.id) return;
+        others.set(row.id, row);
+      })
+      .subscribe((subStatus) => {
+        if (subStatus === 'SUBSCRIBED') {
+          $status.textContent = 'Connected. You are ' + myUsername + '.';
+        }
+      });
+
+    window.addEventListener('beforeunload', () => {
+      navigator.sendBeacon && supabaseClient.from('world_players').delete().eq('id', currentUser.id);
+    });
+
+    requestAnimationFrame(loop);
+    setInterval(sendPosition, SEND_INTERVAL_MS);
+  }
+
+  let lastSent = { x: null, y: null };
+  async function sendPosition() {
+    if (!currentUser) return;
+    if (lastSent.x === me.x && lastSent.y === me.y) return;
+    lastSent = { x: me.x, y: me.y };
+    await supabaseClient.from('world_players').update({
+      x: me.x,
+      y: me.y,
+      updated_at: new Date().toISOString()
+    }).eq('id', currentUser.id);
+  }
+
+  let lastFrame = performance.now();
+  function loop(now) {
+    const dt = Math.min((now - lastFrame) / 1000, 0.05);
+    lastFrame = now;
+
+    let dx = 0, dy = 0;
+    if (keys['w'] || keys['arrowup']) dy -= 1;
+    if (keys['s'] || keys['arrowdown']) dy += 1;
+    if (keys['a'] || keys['arrowleft']) dx -= 1;
+    if (keys['d'] || keys['arrowright']) dx += 1;
+
+    if (dx !== 0 || dy !== 0) {
+      const len = Math.sqrt(dx * dx + dy * dy);
+      dx /= len; dy /= len;
+      me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x + dx * SPEED * dt));
+      me.y = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_H - PLAYER_SIZE / 2, me.y + dy * SPEED * dt));
+    }
+
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function drawPlayer(x, y, color, label, isMe) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, PLAYER_SIZE / 2, 0, Math.PI * 2);
+    ctx.fill();
+    if (isMe) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#e9ebf1';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, x, y - PLAYER_SIZE / 2 - 6);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+
+    // simple grid background
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    for (let gx = 0; gx < WORLD_W; gx += 40) {
+      ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, WORLD_H); ctx.stroke();
+    }
+    for (let gy = 0; gy < WORLD_H; gy += 40) {
+      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
+    }
+
+    const now = Date.now();
+    let liveCount = 1;
+    others.forEach((p) => {
+      const age = now - new Date(p.updated_at).getTime();
+      if (age > STALE_MS) return;
+      liveCount++;
+      drawPlayer(p.x, p.y, p.color || '#6ea8ff', p.username || 'Anon', false);
+    });
+
+    drawPlayer(me.x, me.y, myColor, myUsername, true);
+    $playerCount.textContent = liveCount;
+  }
+
+  init();
+})();
+</script>
+
+</body>
+</html>
