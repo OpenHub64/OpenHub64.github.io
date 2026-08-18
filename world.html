@@ -226,16 +226,25 @@
   // ── Aiming ──────────────────────────────────────────────────────────────
   // Aim direction is controlled with O (rotate left/counter-clockwise) and
   // P (rotate right/clockwise) instead of the mouse. 0 = facing right.
+  // The gun has weight: input changes angular velocity (not the angle
+  // directly), so it always keeps moving/coasting under O/P rather than
+  // snapping instantly or ever locking in place.
   let aimAngle = 0;
-  const AIM_ROTATE_SPEED = 3.2; // radians per second
+  let aimVel   = 0; // current angular velocity, radians/sec
+  const AIM_ROTATE_SPEED  = 3.2; // max radians per second
+  const AIM_ANGULAR_ACCEL = 16;  // radians/sec^2 — how quickly the gun spins up/down
+  const AIM_DAMPING       = 6;   // radians/sec^2 — how quickly velocity bleeds off with no input
 
   // ── Aim assist ──────────────────────────────────────────────────────────
-  // When aim is already close to an alive nearby player, rotation eases up
-  // (more "weight") and gently pulls toward them, like console aim assist.
-  const AIM_ASSIST_RANGE     = 420;  // only assists toward players within this distance
-  const AIM_ASSIST_TOLERANCE = 0.32; // radians — how close the aim has to be to kick in
-  const AIM_ASSIST_SLOWDOWN  = 0.55; // fraction rotation speed is reduced by at dead-on
-  const AIM_ASSIST_PULL      = 1.8;  // radians/sec of extra pull toward target when very close
+  // When aim is already close to an alive nearby player, the gun just feels
+  // heavier (slower to spin up, lower top speed) — O/P still always move
+  // it, it never locks or snaps on its own. Separately, firing a shot while
+  // near a target nudges that shot (and the visible aim) a bit closer to
+  // them, like a one-time snap rather than a constant magnet.
+  const AIM_ASSIST_RANGE      = 420;  // only assists toward players within this distance
+  const AIM_ASSIST_TOLERANCE  = 0.32; // radians — how close the aim has to be to kick in
+  const AIM_ASSIST_WEIGHT     = 0.6;  // fraction accel/top-speed is reduced by at dead-on
+  const AIM_ASSIST_SHOOT_PULL = 0.35; // fraction of the remaining angle gap closed on each shot
 
   // Chat bubble over my own head
   let myChatBubbleText = '';
@@ -255,6 +264,17 @@
     const now = performance.now();
     if (now - lastShotAt < SHOOT_COOLDOWN_MS) return;
     lastShotAt = now;
+
+    // If a nearby player is close to where we're aiming, nudge the aim (and
+    // this shot) a bit closer to them — fired only on shots, not a
+    // continuous magnet, so it reads as "the gun kicked toward them" rather
+    // than the reticle being glued to a target.
+    const assist = findAimAssistTarget();
+    if (assist) {
+      const gap = angleDiff(aimAngle, assist.angle);
+      aimAngle += gap * AIM_ASSIST_SHOOT_PULL;
+      aimVel = 0; // the nudge overrides any current spin so they don't fight
+    }
 
     spawnBullet(currentUser.id, me.x, me.y, aimAngle, myColor, true);
   }
@@ -702,25 +722,36 @@
       }
       jumpKeyHeld = jumpKeyDown;
 
-      // Aim: O rotates counter-clockwise, P rotates clockwise.
-      // Aim assist: if a nearby player is close to the current aim angle,
-      // rotation eases up (more "weight") and gently pulls toward them.
+      // Aim: O rotates counter-clockwise, P rotates clockwise. The gun has
+      // weight — O/P change angular velocity, not the angle directly — so
+      // it keeps drifting/coasting rather than snapping to a fixed speed.
+      // Aim assist: near a target the gun just gets heavier (slower to
+      // accelerate, lower top speed); it never stops responding to input.
       const assist = findAimAssistTarget();
-      let rotateSpeed = AIM_ROTATE_SPEED;
+      let maxSpeed = AIM_ROTATE_SPEED;
+      let accel = AIM_ANGULAR_ACCEL;
       if (assist) {
         const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE; // 0..1, 1 = dead on
-        rotateSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_SLOWDOWN * closeness);
+        maxSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_WEIGHT * closeness);
+        accel = AIM_ANGULAR_ACCEL * (1 - AIM_ASSIST_WEIGHT * closeness);
       }
 
-      if (keys['o']) aimAngle -= rotateSpeed * dt;
-      if (keys['p']) aimAngle += rotateSpeed * dt;
+      let inputDir = 0;
+      if (keys['o']) inputDir -= 1;
+      if (keys['p']) inputDir += 1;
 
-      if (assist) {
-        const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE;
-        const pull = angleDiff(aimAngle, assist.angle);
-        const maxStep = AIM_ASSIST_PULL * closeness * dt;
-        aimAngle += Math.max(-maxStep, Math.min(maxStep, pull));
+      if (inputDir !== 0) {
+        aimVel += inputDir * accel * dt;
+        aimVel = Math.max(-maxSpeed, Math.min(maxSpeed, aimVel));
+      } else {
+        // No input — bleed velocity off so the gun settles instead of
+        // spinning forever, but it still coasts a bit first (weight).
+        const damp = AIM_DAMPING * dt;
+        if (aimVel > 0) aimVel = Math.max(0, aimVel - damp);
+        else if (aimVel < 0) aimVel = Math.min(0, aimVel + damp);
       }
+
+      aimAngle += aimVel * dt;
 
       // keep in a tidy -PI..PI range
       if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
