@@ -148,7 +148,7 @@
   <p><a href="index.html">Sign in on OpenHub</a>, then come back here.</p>
 </div>
 
-<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air), <strong>O/P</strong> to aim, <strong>click</strong> to shoot, <strong>Enter</strong> to chat. Players online: <span id="playerCount">0</span></p>
+<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air), <strong>O/P</strong> to aim, <strong>[</strong> or <strong>click</strong> to shoot, <strong>Enter</strong> to chat. Players online: <span id="playerCount">0</span></p>
 
 <script>
 (function () {
@@ -240,7 +240,7 @@
 
   let broadcastChannelRef = null;
 
-  canvas.addEventListener('mousedown', () => {
+  function tryShoot() {
     if (!currentUser || !myAlive) return;
     if (document.activeElement === $chatInput) return; // don't shoot while typing
     const now = performance.now();
@@ -248,6 +248,16 @@
     lastShotAt = now;
 
     spawnBullet(currentUser.id, me.x, me.y, aimAngle, myColor, true);
+  }
+
+  canvas.addEventListener('mousedown', tryShoot);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '[') {
+      if (document.activeElement === $chatInput) return;
+      e.preventDefault();
+      tryShoot();
+    }
   });
 
   function spawnBullet(ownerId, x, y, angle, color, isMine) {
