@@ -50,6 +50,7 @@
     border-radius: 10px;
     image-rendering: pixelated;
     touch-action: none;
+    cursor: crosshair;
   }
   #loginGate {
     max-width: 400px; width: 100%;
@@ -83,7 +84,7 @@
   <p><a href="index.html">Sign in on OpenHub</a>, then come back here.</p>
 </div>
 
-<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air). Players online: <span id="playerCount">0</span></p>
+<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air), <strong>click</strong> to shoot. Players online: <span id="playerCount">0</span></p>
 
 <script>
 (function () {
@@ -113,6 +114,16 @@
   const STALE_MS      = 15000;     // remove players silent for this long
   const LERP_FACTOR   = 0.18;      // interpolation per frame for other players — tune 0.10 (smoother) – 0.25 (snappier)
 
+  // ── Combat ────────────────────────────────────────────────────────────────
+  const MAX_HEALTH      = 100;
+  const BULLET_DAMAGE    = 18;
+  const BULLET_SPEED     = 760;    // px per second
+  const BULLET_RADIUS    = 4;
+  const BULLET_LIFETIME  = 1100;   // ms before a bullet despawns
+  const HIT_RADIUS       = PLAYER_SIZE / 2 + BULLET_RADIUS;
+  const RESPAWN_MS       = 2500;
+  const SHOOT_COOLDOWN_MS = 220;
+
   // ── Platforms (solid ground the player can stand on / land on) ─────────────
   // x,y = top-left corner. Player rests with feet on top surface (y).
   const GROUND_Y = WORLD_H - 40;
@@ -136,10 +147,57 @@
   let jumpsUsed  = 0;           // 0 = none used, 1 = first jump, 2 = double jump used
   let jumpKeyHeld = false;      // edge-trigger so holding jump doesn't spam
 
-  // Other players: id → { username, color, x, y, tx, ty, updated_at }
+  // Combat state (self-authoritative — I own my own health)
+  let myHealth   = MAX_HEALTH;
+  let myAlive    = true;
+  let respawnAt  = 0;
+  let lastShotAt = 0;
+
+  // Bullets in flight: id → { ownerId, x, y, vx, vy, spawnedAt, color }
+  const bullets = new Map();
+  let bulletSeq = 0;
+
+  // Other players: id → { username, color, x, y, tx, ty, updated_at, health, alive }
   //   x/y  = interpolated render position
   //   tx/ty = target position received from broadcast
   const others = new Map();
+
+  // ─── Mouse / shooting ──────────────────────────────────────────────────────
+  let broadcastChannelRef = null;
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (!currentUser || !myAlive) return;
+    const now = performance.now();
+    if (now - lastShotAt < SHOOT_COOLDOWN_MS) return;
+    lastShotAt = now;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const clickX = (e.clientX - rect.left) * scaleX;
+    const clickY = (e.clientY - rect.top) * scaleY;
+
+    const angle = Math.atan2(clickY - me.y, clickX - me.x);
+    spawnBullet(currentUser.id, me.x, me.y, angle, myColor, true);
+  });
+
+  function spawnBullet(ownerId, x, y, angle, color, isMine) {
+    const id = ownerId + ':' + (bulletSeq++) + ':' + Date.now();
+    bullets.set(id, {
+      ownerId, color,
+      x, y,
+      vx: Math.cos(angle) * BULLET_SPEED,
+      vy: Math.sin(angle) * BULLET_SPEED,
+      spawnedAt: performance.now()
+    });
+    if (isMine && broadcastChannelRef) {
+      broadcastChannelRef.send({
+        type: 'broadcast',
+        event: 'shoot',
+        payload: { ownerId, x, y, angle, color, id }
+      });
+    }
+  }
 
   // ─── Input ───────────────────────────────────────────────────────────────────
   const keys = Object.create(null);
@@ -182,6 +240,8 @@
     me.x       = 100 + Math.random() * (WORLD_W - 200);
     me.y       = GROUND_Y - PLAYER_SIZE / 2;
     me.vy      = 0;
+    myHealth   = MAX_HEALTH;
+    myAlive    = true;
 
     // Initial DB presence row
     await supabaseClient.from('world_players').upsert({
@@ -198,7 +258,7 @@
     if (existing) {
       existing.forEach((row) => {
         if (row.id === currentUser.id) return;
-        others.set(row.id, { ...row, tx: row.x, ty: row.y });
+        others.set(row.id, { ...row, tx: row.x, ty: row.y, health: MAX_HEALTH, alive: true });
       });
     }
 
@@ -209,10 +269,11 @@
     const broadcastChannel = supabaseClient.channel('world:movement', {
       config: { broadcast: { self: false } }
     });
+    broadcastChannelRef = broadcastChannel;
 
     broadcastChannel
       .on('broadcast', { event: 'move' }, ({ payload }) => {
-        const { id, username, color, x, y } = payload;
+        const { id, username, color, x, y, health, alive } = payload;
         if (id === currentUser.id) return;
 
         const existing = others.get(id);
@@ -222,6 +283,8 @@
           existing.ty = y;
           existing.username   = username;
           existing.color      = color;
+          existing.health     = health;
+          existing.alive      = alive;
           existing.updated_at = Date.now();
         } else {
           // First time seeing this player — snap immediately, no lerp jump
@@ -229,9 +292,14 @@
             id, username, color,
             x, y,       // render starts at target
             tx: x, ty: y,
+            health, alive,
             updated_at: Date.now()
           });
         }
+      })
+      .on('broadcast', { event: 'shoot' }, ({ payload }) => {
+        if (payload.ownerId === currentUser.id) return;
+        spawnBullet(payload.ownerId, payload.x, payload.y, payload.angle, payload.color, false);
       })
       // Also watch DB changes for join/leave events (presence) and late-joiner sync
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'world_players' }, ({ old: o }) => {
@@ -240,7 +308,7 @@
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'world_players' }, ({ new: row }) => {
         if (row.id === currentUser.id) return;
         if (!others.has(row.id)) {
-          others.set(row.id, { ...row, tx: row.x, ty: row.y });
+          others.set(row.id, { ...row, tx: row.x, ty: row.y, health: MAX_HEALTH, alive: true });
         }
       })
       .subscribe((status) => {
@@ -250,11 +318,12 @@
       });
 
     // ── Broadcast loop (high-frequency, no DB) ───────────────────────────────
-    let lastBroadcast = { x: null, y: null };
+    let lastBroadcast = { x: null, y: null, health: null, alive: null };
     setInterval(() => {
       if (!currentUser) return;
-      if (lastBroadcast.x === me.x && lastBroadcast.y === me.y) return;
-      lastBroadcast = { x: me.x, y: me.y };
+      if (lastBroadcast.x === me.x && lastBroadcast.y === me.y &&
+          lastBroadcast.health === myHealth && lastBroadcast.alive === myAlive) return;
+      lastBroadcast = { x: me.x, y: me.y, health: myHealth, alive: myAlive };
       broadcastChannel.send({
         type:    'broadcast',
         event:   'move',
@@ -263,7 +332,9 @@
           username: myUsername,
           color:    myColor,
           x:        Math.round(me.x * 100) / 100,
-          y:        Math.round(me.y * 100) / 100
+          y:        Math.round(me.y * 100) / 100,
+          health:   myHealth,
+          alive:    myAlive
         }
       });
     }, Math.floor(1000 / BROADCAST_HZ));
@@ -297,58 +368,68 @@
     const dt = Math.min((now - lastFrame) / 1000, 0.05);
     lastFrame = now;
 
-    // ── Horizontal input ────────────────────────────────────────────────────
-    let dx = 0;
-    if (keys['a'] || keys['arrowleft'])  dx -= 1;
-    if (keys['d'] || keys['arrowright']) dx += 1;
-    me.x = me.x + dx * MOVE_SPEED * dt;
-    me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x));
-
-    // ── Jump input (edge-triggered — a single press = one jump attempt) ─────
-    const jumpKeyDown = keys['w'] || keys['arrowup'] || keys[' '];
-    if (jumpKeyDown && !jumpKeyHeld) {
-      if (onGround) {
-        me.vy = JUMP_VELOCITY;
-        onGround = false;
-        jumpsUsed = 1;
-      } else if (jumpsUsed === 1) {
-        me.vy = DOUBLE_JUMP_VELOCITY;
-        jumpsUsed = 2;
-      }
-    }
-    jumpKeyHeld = jumpKeyDown;
-
-    // ── Gravity + vertical motion ────────────────────────────────────────────
-    me.vy = Math.min(me.vy + GRAVITY * dt, MAX_FALL_SPEED);
-    const prevBottom = me.y + PLAYER_SIZE / 2;
-    me.y += me.vy * dt;
-
-    // ── Platform collision (only land on solid ground from above) ───────────
-    onGround = false;
-    const half = PLAYER_SIZE / 2;
-    const feetY = me.y + half;
-    const left  = me.x - half * 0.8;   // slightly narrower hitbox for forgiving edges
-    const right = me.x + half * 0.8;
-
-    for (const p of platforms) {
-      const withinX = right > p.x && left < p.x + p.w;
-      if (!withinX) continue;
-      const platTop = p.y;
-      // Only snap to the platform if we were above it last frame and are now
-      // at/below its surface while falling (vy >= 0) — prevents snapping when
-      // jumping up through a platform from below.
-      if (me.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
-        me.y = platTop - half;
-        me.vy = 0;
-        onGround = true;
+    if (!myAlive) {
+      // Frozen while dead — countdown to respawn
+      if (performance.now() >= respawnAt) {
+        myAlive   = true;
+        myHealth  = MAX_HEALTH;
+        me.x      = 100 + Math.random() * (WORLD_W - 200);
+        me.y      = GROUND_Y - PLAYER_SIZE / 2;
+        me.vy     = 0;
+        onGround  = false;
         jumpsUsed = 0;
-        break;
       }
-    }
+    } else {
+      // ── Horizontal input ────────────────────────────────────────────────────
+      let dx = 0;
+      if (keys['a'] || keys['arrowleft'])  dx -= 1;
+      if (keys['d'] || keys['arrowright']) dx += 1;
+      me.x = me.x + dx * MOVE_SPEED * dt;
+      me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x));
 
-    // World bounds — don't fall through the floor platform, don't fly off top
-    if (me.y - half < 0) { me.y = half; me.vy = Math.max(me.vy, 0); }
-    if (me.y + half > WORLD_H) { me.y = WORLD_H - half; me.vy = 0; onGround = true; jumpsUsed = 0; }
+      // ── Jump input (edge-triggered — a single press = one jump attempt) ─────
+      const jumpKeyDown = keys['w'] || keys['arrowup'] || keys[' '];
+      if (jumpKeyDown && !jumpKeyHeld) {
+        if (onGround) {
+          me.vy = JUMP_VELOCITY;
+          onGround = false;
+          jumpsUsed = 1;
+        } else if (jumpsUsed === 1) {
+          me.vy = DOUBLE_JUMP_VELOCITY;
+          jumpsUsed = 2;
+        }
+      }
+      jumpKeyHeld = jumpKeyDown;
+
+      // ── Gravity + vertical motion ────────────────────────────────────────────
+      me.vy = Math.min(me.vy + GRAVITY * dt, MAX_FALL_SPEED);
+      const prevBottom = me.y + PLAYER_SIZE / 2;
+      me.y += me.vy * dt;
+
+      // ── Platform collision (only land on solid ground from above) ───────────
+      onGround = false;
+      const half = PLAYER_SIZE / 2;
+      const feetY = me.y + half;
+      const left  = me.x - half * 0.8;   // slightly narrower hitbox for forgiving edges
+      const right = me.x + half * 0.8;
+
+      for (const p of platforms) {
+        const withinX = right > p.x && left < p.x + p.w;
+        if (!withinX) continue;
+        const platTop = p.y;
+        if (me.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
+          me.y = platTop - half;
+          me.vy = 0;
+          onGround = true;
+          jumpsUsed = 0;
+          break;
+        }
+      }
+
+      // World bounds — don't fall through the floor platform, don't fly off top
+      if (me.y - half < 0) { me.y = half; me.vy = Math.max(me.vy, 0); }
+      if (me.y + half > WORLD_H) { me.y = WORLD_H - half; me.vy = 0; onGround = true; jumpsUsed = 0; }
+    }
 
     // ── Interpolate other players toward their broadcast target ───────────────
     const nowMs = Date.now();
@@ -363,15 +444,72 @@
       p.y = lerp(p.y, p.ty, LERP_FACTOR);
     });
 
+    updateBullets(dt);
+
     draw();
     requestAnimationFrame(loop);
   }
 
+  // ─── Bullets: simulation, platform blocking, and self-authoritative hit detection ──
+  function updateBullets(dt) {
+    const nowPerf = performance.now();
+    bullets.forEach((b, id) => {
+      if (nowPerf - b.spawnedAt > BULLET_LIFETIME) { bullets.delete(id); return; }
+
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+
+      if (b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) { bullets.delete(id); return; }
+
+      // Blocked by solid platforms
+      for (const p of platforms) {
+        if (b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h) {
+          bullets.delete(id);
+          return;
+        }
+      }
+
+      // Self-authoritative hit check: only I decide if a bullet (that isn't mine)
+      // hit ME, using my own real position — avoids trusting shooter's lag/lerp.
+      if (b.ownerId !== currentUser.id && myAlive) {
+        const ddx = b.x - me.x, ddy = b.y - me.y;
+        if (ddx * ddx + ddy * ddy <= HIT_RADIUS * HIT_RADIUS) {
+          bullets.delete(id);
+          myHealth = Math.max(0, myHealth - BULLET_DAMAGE);
+          if (myHealth <= 0) {
+            myAlive   = false;
+            respawnAt = performance.now() + RESPAWN_MS;
+          }
+        }
+      }
+    });
+  }
+
   // ─── Rendering ───────────────────────────────────────────────────────────────
-  function drawPlayer(x, y, color, label, isMe) {
-    // Shadow
-    ctx.shadowColor   = isMe ? 'rgba(110,231,200,0.35)' : 'rgba(0,0,0,0.4)';
-    ctx.shadowBlur    = isMe ? 12 : 6;
+  function drawHealthBar(x, y, health, isMe) {
+    const w = 32, h = 5;
+    const bx = x - w / 2, by = y - PLAYER_SIZE / 2 - 20;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(bx, by, w, h);
+    const pct = Math.max(0, health) / MAX_HEALTH;
+    ctx.fillStyle = pct > 0.5 ? '#7ee787' : (pct > 0.25 ? '#ffd166' : '#ff6b6b');
+    ctx.fillRect(bx, by, w * pct, h);
+  }
+
+  function drawPlayer(x, y, color, label, isMe, health, alive) {
+    if (!alive) {
+      // Dead — faded ghost marker only
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, PLAYER_SIZE / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    ctx.shadowColor = isMe ? 'rgba(110,231,200,0.35)' : 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur  = isMe ? 12 : 6;
 
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -386,7 +524,6 @@
 
     ctx.shadowBlur = 0;
 
-    // Username label
     ctx.fillStyle   = '#e9ebf1';
     ctx.font        = '12px Arial';
     ctx.textAlign   = 'center';
@@ -394,6 +531,20 @@
     ctx.shadowBlur  = 4;
     ctx.fillText(label, x, y - PLAYER_SIZE / 2 - 6);
     ctx.shadowBlur  = 0;
+
+    drawHealthBar(x, y, health, isMe);
+  }
+
+  function drawBullets() {
+    bullets.forEach((b) => {
+      ctx.fillStyle = b.color || '#fff';
+      ctx.shadowColor = b.color || '#fff';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, BULLET_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
   }
 
   function draw() {
@@ -417,13 +568,31 @@
       ctx.fillRect(p.x, p.y, p.w, 4);
     });
 
+    drawBullets();
+
     let liveCount = 1;
     others.forEach((p) => {
       liveCount++;
-      drawPlayer(p.x, p.y, p.color || '#6ea8ff', p.username || 'Anon', false);
+      const alive = p.alive !== false;
+      drawPlayer(p.x, p.y, p.color || '#6ea8ff', p.username || 'Anon', false, p.health ?? MAX_HEALTH, alive);
     });
 
-    drawPlayer(me.x, me.y, myColor, myUsername, true);
+    drawPlayer(me.x, me.y, myColor, myUsername, true, myHealth, myAlive);
+
+    // Death overlay
+    if (!myAlive) {
+      const secsLeft = Math.max(0, (respawnAt - performance.now()) / 1000);
+      ctx.fillStyle = 'rgba(10,12,16,0.55)';
+      ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+      ctx.fillStyle = '#ff6b6b';
+      ctx.font = 'bold 28px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('You died', WORLD_W / 2, WORLD_H / 2 - 10);
+      ctx.fillStyle = '#e9ebf1';
+      ctx.font = '15px Arial';
+      ctx.fillText(`Respawning in ${secsLeft.toFixed(1)}s`, WORLD_W / 2, WORLD_H / 2 + 20);
+    }
+
     $playerCount.textContent = liveCount;
   }
 
