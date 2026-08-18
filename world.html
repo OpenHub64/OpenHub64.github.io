@@ -184,8 +184,8 @@
   const $chatInput   = document.getElementById('chatInput');
   const $chatSendBtn = document.getElementById('chatSendBtn');
 
-  const WORLD_W       = 6000;      // the level is huge — camera follows the player around it
-  const WORLD_H       = 3000;
+  const WORLD_W       = 2600;      // camera follows the player around the level
+  const WORLD_H       = 1500;
   const ZOOM          = 1.8;       // render scale — >1 = zoomed in
   const PLAYER_SIZE   = 24;
   const MOVE_SPEED    = 220;       // horizontal px per second
@@ -241,7 +241,7 @@
     { x: 0, y: GROUND_Y, w: WORLD_W, h: 40 }
   ];
 
-  const SECTION_W = 420;
+  const SECTION_W = 260;
   const hopHeights = [
     GROUND_Y - 140, GROUND_Y - 260, GROUND_Y - 380,
     GROUND_Y - 200, GROUND_Y - 320, GROUND_Y - 460
@@ -249,17 +249,27 @@
   for (let i = 1; i * SECTION_W < WORLD_W; i++) {
     const baseX = i * SECTION_W + (i % 2 === 0 ? 30 : -30);
     const h = hopHeights[i % hopHeights.length];
-    const w = 120 + (i % 4) * 30;
+    const w = 110 + (i % 4) * 25;
     platforms.push({ x: baseX, y: h, w, h: 18 });
   }
 
-  const TOWER_SPACING = 1300;
+  const TOWER_SPACING = 700;
   for (let i = 0; i * TOWER_SPACING < WORLD_W; i++) {
-    const towerX = 500 + i * TOWER_SPACING;
-    platforms.push({ x: towerX,       y: GROUND_Y - 520, w: 130, h: 18 });
-    platforms.push({ x: towerX + 190, y: GROUND_Y - 680, w: 130, h: 18 });
-    platforms.push({ x: towerX - 190, y: GROUND_Y - 840, w: 130, h: 18 });
-    platforms.push({ x: towerX,       y: GROUND_Y - 1000, w: 130, h: 18 });
+    const towerX = 350 + i * TOWER_SPACING;
+    platforms.push({ x: towerX,       y: GROUND_Y - 520, w: 120, h: 18 });
+    platforms.push({ x: towerX + 170, y: GROUND_Y - 680, w: 120, h: 18 });
+    platforms.push({ x: towerX - 170, y: GROUND_Y - 840, w: 120, h: 18 });
+    platforms.push({ x: towerX,       y: GROUND_Y - 1000, w: 120, h: 18 });
+  }
+
+  // Extra scattered mid-height layer offset from the hop chain so there's
+  // always a nearby ledge to duck behind or jump to, not just the two chains above.
+  const SCATTER_SPACING = 340;
+  const scatterHeights = [GROUND_Y - 100, GROUND_Y - 300, GROUND_Y - 560, GROUND_Y - 900];
+  for (let i = 0; i * SCATTER_SPACING < WORLD_W; i++) {
+    const sx = 150 + i * SCATTER_SPACING + (i % 3) * 60;
+    const sy = scatterHeights[i % scatterHeights.length];
+    platforms.push({ x: sx, y: sy, w: 90 + (i % 3) * 20, h: 18 });
   }
 
   let currentUser = null;
