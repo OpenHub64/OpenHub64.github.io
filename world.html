@@ -447,8 +447,48 @@
     return d;
   }
 
-  // Finds the nearest alive player whose direction from me is within
-  // AIM_ASSIST_TOLERANCE of the current aim angle. Returns null if none.
+  // Solves for the launch angle (screen coords, +y = down) that lands a
+  // gravity-affected shot on a target offset by (dx, dy), given bullet
+  // speed and gravity. This is the standard projectile "angle to hit a
+  // point" formula — picks the flatter (more direct) of the two solutions.
+  // Falls back to the plain straight-line angle if the target is out of
+  // range for the current speed/gravity (no real solution).
+  function solveLaunchAngle(dx, dy, speed, gravity) {
+    if (Math.abs(dx) < 1) {
+      return Math.atan2(dy, dx || 0.001);
+    }
+    const v2 = speed * speed;
+    const A = (gravity * dx * dx) / (2 * v2);
+    const B = dx;
+    const C = A - dy;
+    if (Math.abs(A) < 1e-9) return Math.atan2(dy, dx);
+
+    const disc = B * B - 4 * A * C;
+    if (disc < 0) return Math.atan2(dy, dx); // unreachable — best-effort fallback
+
+    const sqrtDisc = Math.sqrt(disc);
+    const t1 = (-B + sqrtDisc) / (2 * A);
+    const t2 = (-B - sqrtDisc) / (2 * A);
+
+    // tan(theta) = T has two angle solutions 180deg apart; pick whichever
+    // has cos(theta) matching the sign of dx (so the shot actually travels
+    // toward the target instead of away from it).
+    function angleFromTan(T) {
+      let theta = Math.atan(T);
+      if (dx < 0) theta += Math.PI;
+      if (theta > Math.PI) theta -= Math.PI * 2;
+      if (theta < -Math.PI) theta += Math.PI * 2;
+      return theta;
+    }
+
+    const theta1 = angleFromTan(t1);
+    const theta2 = angleFromTan(t2);
+    // Prefer the flatter (smaller-magnitude) trajectory — the more direct shot.
+    return Math.abs(theta1) <= Math.abs(theta2) ? theta1 : theta2;
+  }
+
+  // Finds the nearest alive player whose gravity-compensated firing angle is
+  // within AIM_ASSIST_TOLERANCE of the current aim angle. Returns null if none.
   function findAimAssistTarget() {
     let best = null;
     let bestDiff = AIM_ASSIST_TOLERANCE;
@@ -457,7 +497,7 @@
       const ddx = p.x - me.x, ddy = p.y - me.y;
       const dist = Math.sqrt(ddx * ddx + ddy * ddy);
       if (dist > AIM_ASSIST_RANGE) return;
-      const targetAngle = Math.atan2(ddy, ddx);
+      const targetAngle = solveLaunchAngle(ddx, ddy, BULLET_SPEED, BULLET_GRAVITY);
       const diff = Math.abs(angleDiff(aimAngle, targetAngle));
       if (diff < bestDiff) {
         bestDiff = diff;
@@ -865,7 +905,7 @@
 
   // Dotted preview of where a bullet fired right now would travel, using the
   // exact same speed/gravity model as real bullets so it's an honest predictor.
-  const TRAJECTORY_STEP_MS = 45;
+  const TRAJECTORY_STEP_MS = 9;
   const TRAJECTORY_MAX_STEPS = Math.ceil(BULLET_LIFETIME / TRAJECTORY_STEP_MS);
 
   function drawTrajectoryPreview(x, y, angle, color) {
@@ -888,14 +928,11 @@
       }
       if (blocked) break;
 
-      // Only draw every other step so it reads as a dotted arc, not a solid line.
-      if (i % 2 === 0) {
-        const fade = 1 - i / TRAJECTORY_MAX_STEPS;
-        ctx.globalAlpha = Math.max(0.08, fade * 0.55);
-        ctx.beginPath();
-        ctx.arc(px, py, 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      const fade = 1 - i / TRAJECTORY_MAX_STEPS;
+      ctx.globalAlpha = Math.max(0.08, fade * 0.55);
+      ctx.beginPath();
+      ctx.arc(px, py, 1.4, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.globalAlpha = 1;
   }
