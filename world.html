@@ -223,7 +223,6 @@
   const BULLET_SPEED     = 760;    // px per second
   const BULLET_GRAVITY    = 420;   // px/s^2 — slight arc on bullets, gentler than player gravity
   const BULLET_RADIUS    = 4;
-  const BULLET_LIFETIME  = 1100;   // ms before a bullet despawns
   const HIT_RADIUS       = PLAYER_SIZE / 2 + BULLET_RADIUS;
   const RESPAWN_MS       = 2500;
   const SHOOT_COOLDOWN_MS = 220;
@@ -346,8 +345,7 @@
       ownerId, color,
       x, y,
       vx: Math.cos(angle) * BULLET_SPEED,
-      vy: Math.sin(angle) * BULLET_SPEED,
-      spawnedAt: performance.now()
+      vy: Math.sin(angle) * BULLET_SPEED
     });
     if (isMine && broadcastChannelRef) {
       broadcastChannelRef.send({
@@ -886,10 +884,7 @@
   }
 
   function updateBullets(dt) {
-    const nowPerf = performance.now();
     bullets.forEach((b, id) => {
-      if (nowPerf - b.spawnedAt > BULLET_LIFETIME) { bullets.delete(id); return; }
-
       b.vy += BULLET_GRAVITY * dt;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
@@ -999,8 +994,11 @@
 
   // Dotted preview of where a bullet fired right now would travel, using the
   // exact same speed/gravity model as real bullets so it's an honest predictor.
+  // This is just a rendering budget for the preview line — real bullets now
+  // fly until they hit something, with no time limit.
   const TRAJECTORY_STEP_MS = 9;
-  const TRAJECTORY_MAX_STEPS = Math.ceil(BULLET_LIFETIME / TRAJECTORY_STEP_MS);
+  const TRAJECTORY_PREVIEW_MS = 1400;
+  const TRAJECTORY_MAX_STEPS = Math.ceil(TRAJECTORY_PREVIEW_MS / TRAJECTORY_STEP_MS);
 
   function drawTrajectoryPreview(x, y, angle, color) {
     const dt = TRAJECTORY_STEP_MS / 1000;
