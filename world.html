@@ -186,6 +186,7 @@
   const MAX_HEALTH      = 100;
   const BULLET_DAMAGE    = 18;
   const BULLET_SPEED     = 760;    // px per second
+  const BULLET_GRAVITY    = 420;   // px/s^2 — slight arc on bullets, gentler than player gravity
   const BULLET_RADIUS    = 4;
   const BULLET_LIFETIME  = 1100;   // ms before a bullet despawns
   const HIT_RADIUS       = PLAYER_SIZE / 2 + BULLET_RADIUS;
@@ -227,6 +228,14 @@
   // P (rotate right/clockwise) instead of the mouse. 0 = facing right.
   let aimAngle = 0;
   const AIM_ROTATE_SPEED = 3.2; // radians per second
+
+  // ── Aim assist ──────────────────────────────────────────────────────────
+  // When aim is already close to an alive nearby player, rotation eases up
+  // (more "weight") and gently pulls toward them, like console aim assist.
+  const AIM_ASSIST_RANGE     = 420;  // only assists toward players within this distance
+  const AIM_ASSIST_TOLERANCE = 0.32; // radians — how close the aim has to be to kick in
+  const AIM_ASSIST_SLOWDOWN  = 0.55; // fraction rotation speed is reduced by at dead-on
+  const AIM_ASSIST_PULL      = 1.8;  // radians/sec of extra pull toward target when very close
 
   // Chat bubble over my own head
   let myChatBubbleText = '';
@@ -430,6 +439,34 @@
 
   function lerp(a, b, t) { return a + (b - a) * t; }
 
+  // Shortest signed difference from a to b, wrapped to [-PI, PI].
+  function angleDiff(a, b) {
+    let d = (b - a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  // Finds the nearest alive player whose direction from me is within
+  // AIM_ASSIST_TOLERANCE of the current aim angle. Returns null if none.
+  function findAimAssistTarget() {
+    let best = null;
+    let bestDiff = AIM_ASSIST_TOLERANCE;
+    others.forEach((p) => {
+      if (p.alive === false) return;
+      const ddx = p.x - me.x, ddy = p.y - me.y;
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (dist > AIM_ASSIST_RANGE) return;
+      const targetAngle = Math.atan2(ddy, ddx);
+      const diff = Math.abs(angleDiff(aimAngle, targetAngle));
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = { angle: targetAngle, diff };
+      }
+    });
+    return best;
+  }
+
   // ─── Initialisation ──────────────────────────────────────────────────────────
   async function init() {
     const { data: { session } } = await supabaseClient.auth.getSession();
@@ -626,8 +663,25 @@
       jumpKeyHeld = jumpKeyDown;
 
       // Aim: O rotates counter-clockwise, P rotates clockwise.
-      if (keys['o']) aimAngle -= AIM_ROTATE_SPEED * dt;
-      if (keys['p']) aimAngle += AIM_ROTATE_SPEED * dt;
+      // Aim assist: if a nearby player is close to the current aim angle,
+      // rotation eases up (more "weight") and gently pulls toward them.
+      const assist = findAimAssistTarget();
+      let rotateSpeed = AIM_ROTATE_SPEED;
+      if (assist) {
+        const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE; // 0..1, 1 = dead on
+        rotateSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_SLOWDOWN * closeness);
+      }
+
+      if (keys['o']) aimAngle -= rotateSpeed * dt;
+      if (keys['p']) aimAngle += rotateSpeed * dt;
+
+      if (assist) {
+        const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE;
+        const pull = angleDiff(aimAngle, assist.angle);
+        const maxStep = AIM_ASSIST_PULL * closeness * dt;
+        aimAngle += Math.max(-maxStep, Math.min(maxStep, pull));
+      }
+
       // keep in a tidy -PI..PI range
       if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
       if (aimAngle < -Math.PI) aimAngle += Math.PI * 2;
@@ -702,6 +756,7 @@
     bullets.forEach((b, id) => {
       if (nowPerf - b.spawnedAt > BULLET_LIFETIME) { bullets.delete(id); return; }
 
+      b.vy += BULLET_GRAVITY * dt;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
 
@@ -808,6 +863,43 @@
     ctx.fill();
   }
 
+  // Dotted preview of where a bullet fired right now would travel, using the
+  // exact same speed/gravity model as real bullets so it's an honest predictor.
+  const TRAJECTORY_STEP_MS = 45;
+  const TRAJECTORY_MAX_STEPS = Math.ceil(BULLET_LIFETIME / TRAJECTORY_STEP_MS);
+
+  function drawTrajectoryPreview(x, y, angle, color) {
+    const dt = TRAJECTORY_STEP_MS / 1000;
+    let px = x, py = y;
+    let vx = Math.cos(angle) * BULLET_SPEED;
+    let vy = Math.sin(angle) * BULLET_SPEED;
+
+    ctx.fillStyle = color;
+    for (let i = 1; i <= TRAJECTORY_MAX_STEPS; i++) {
+      vy += BULLET_GRAVITY * dt;
+      px += vx * dt;
+      py += vy * dt;
+
+      if (px < 0 || px > WORLD_W || py < 0 || py > WORLD_H) break;
+
+      let blocked = false;
+      for (const p of platforms) {
+        if (px > p.x && px < p.x + p.w && py > p.y && py < p.y + p.h) { blocked = true; break; }
+      }
+      if (blocked) break;
+
+      // Only draw every other step so it reads as a dotted arc, not a solid line.
+      if (i % 2 === 0) {
+        const fade = 1 - i / TRAJECTORY_MAX_STEPS;
+        ctx.globalAlpha = Math.max(0.08, fade * 0.55);
+        ctx.beginPath();
+        ctx.arc(px, py, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function drawPlayer(x, y, color, label, isMe, health, alive) {
     if (!alive) {
       ctx.globalAlpha = 0.25;
@@ -893,6 +985,7 @@
 
     drawPlayer(me.x, me.y, myColor, myUsername, true, myHealth, myAlive);
     if (myAlive) {
+      drawTrajectoryPreview(me.x, me.y, aimAngle, myColor);
       drawAimLine(me.x, me.y, aimAngle, myColor);
     }
     if (myAlive && myChatBubbleText) {
