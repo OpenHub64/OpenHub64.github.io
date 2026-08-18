@@ -22,43 +22,52 @@
     background: var(--bg); color: var(--text);
     font-family: Arial, sans-serif;
     height: 100%;
+    overflow: hidden;
   }
   body {
-    display: flex; flex-direction: column; align-items: center;
-    padding: 1.5rem 1rem 2.5rem;
+    width: 100vw; height: 100vh;
+    position: relative;
   }
   header {
-    width: 100%; max-width: 900px;
+    position: fixed; top: 12px; left: 12px; right: 12px;
     display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 1rem;
+    z-index: 10;
+    pointer-events: none;
   }
-  header h1 { font-size: 1.4rem; margin: 0; }
+  header h1 {
+    font-size: 1.1rem; margin: 0;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
   a.home-btn {
+    pointer-events: auto;
     text-decoration: none; color: var(--accent);
+    background: rgba(20,22,28,0.6);
     border: 1px solid var(--accent-dark); border-radius: 999px;
     padding: 0.35rem 0.9rem; font-size: 0.85rem;
   }
-  #status { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.75rem; }
+  #status {
+    position: fixed; top: 46px; left: 12px; z-index: 10;
+    color: var(--muted); font-size: 0.8rem;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
   #gameWrap {
-    position: relative;
-    width: 100%; max-width: 900px;
+    position: fixed; inset: 0;
+    width: 100vw; height: 100vh;
   }
   canvas {
-    display: block; width: 100%; height: auto;
+    display: block; width: 100vw; height: 100vh;
     background: #10131a;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    image-rendering: pixelated;
     touch-action: none;
-    cursor: default;
+    cursor: crosshair;
   }
 
   /* ── Chat box: bottom-left overlay on the game canvas ─────────────────── */
   #chatBox {
-    position: absolute;
-    left: 10px;
-    bottom: 10px;
-    width: min(320px, 42%);
+    position: fixed;
+    left: 12px;
+    bottom: 44px;
+    width: min(320px, 90vw);
+    z-index: 10;
     display: flex;
     flex-direction: column;
     background: rgba(20,22,28,0.72);
@@ -109,14 +118,19 @@
   #chatSendBtn:hover { background: #85f0d4; }
 
   #loginGate {
-    max-width: 400px; width: 100%;
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 20;
+    max-width: 400px; width: 90vw;
     background: var(--panel); border: 1px solid var(--border);
     border-radius: 10px; padding: 1.5rem; text-align: center;
   }
   #loginGate p { color: var(--muted); line-height: 1.5; }
   #loginGate a { color: var(--accent); }
   .hint {
-    margin-top: 0.75rem; color: var(--muted); font-size: 0.85rem; text-align: center;
+    position: fixed; bottom: 8px; left: 12px; right: 12px;
+    z-index: 10;
+    margin: 0; color: var(--muted); font-size: 0.78rem; text-align: center;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
   }
   #playerCount { color: var(--accent); }
 </style>
@@ -132,7 +146,7 @@
 <div id="status">Connecting…</div>
 
 <div id="gameWrap" style="display:none;">
-  <canvas id="game" width="900" height="600"></canvas>
+  <canvas id="game"></canvas>
 
   <div id="chatBox">
     <div id="chatLog"></div>
@@ -149,6 +163,7 @@
 </div>
 
 <p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air), <strong>I/P</strong> to aim, <strong>O</strong> or <strong>click</strong> to shoot, <strong>Enter</strong> to chat. Players online: <span id="playerCount">0</span></p>
+
 
 <script>
 (function () {
@@ -169,8 +184,9 @@
   const $chatInput   = document.getElementById('chatInput');
   const $chatSendBtn = document.getElementById('chatSendBtn');
 
-  const WORLD_W       = canvas.width;
-  const WORLD_H       = canvas.height;
+  const WORLD_W       = 6000;      // the level is huge — camera follows the player around it
+  const WORLD_H       = 3000;
+  const ZOOM          = 1.8;       // render scale — >1 = zoomed in
   const PLAYER_SIZE   = 24;
   const MOVE_SPEED    = 220;       // horizontal px per second
   const GRAVITY       = 1400;      // px per second^2
@@ -181,6 +197,25 @@
   const DB_SYNC_MS    = 3000;      // write to DB every 3s just to keep presence alive for join-late players
   const STALE_MS      = 20000;     // remove players silent this long (must exceed HEARTBEAT_MS with margin)
   const LERP_FACTOR   = 0.18;      // interpolation per frame for other players — tune 0.10 (smoother) – 0.25 (snappier)
+
+  // Camera follows the local player around the (much bigger) world. Position
+  // is the world coordinate of the viewport's top-left corner, clamped so it
+  // never shows past the world edges.
+  const camera = { x: 0, y: 0 };
+
+  function resizeCanvas() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  function updateCamera() {
+    const viewW = canvas.width / ZOOM;
+    const viewH = canvas.height / ZOOM;
+    camera.x = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
+    camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
+  }
 
   // ── Combat ────────────────────────────────────────────────────────────────
   const MAX_HEALTH      = 100;
@@ -198,16 +233,34 @@
   const CHAT_LOG_MAX   = 200;    // cap local chat log length
 
   // ── Platforms (solid ground the player can stand on / land on) ─────────────
+  // Built deterministically (never Math.random) so every client's collision
+  // geometry is identical. A full-width ground, a staggered chain of hops
+  // running the length of the world, and a few climbable towers along the way.
   const GROUND_Y = WORLD_H - 40;
   const platforms = [
-    { x: 0,   y: GROUND_Y, w: WORLD_W, h: 40 },
-    { x: 120, y: 460,      w: 160,     h: 18 },
-    { x: 360, y: 380,      w: 140,     h: 18 },
-    { x: 580, y: 300,      w: 160,     h: 18 },
-    { x: 340, y: 220,      w: 120,     h: 18 },
-    { x: 60,  y: 260,      w: 120,     h: 18 },
-    { x: 700, y: 460,      w: 140,     h: 18 }
+    { x: 0, y: GROUND_Y, w: WORLD_W, h: 40 }
   ];
+
+  const SECTION_W = 420;
+  const hopHeights = [
+    GROUND_Y - 140, GROUND_Y - 260, GROUND_Y - 380,
+    GROUND_Y - 200, GROUND_Y - 320, GROUND_Y - 460
+  ];
+  for (let i = 1; i * SECTION_W < WORLD_W; i++) {
+    const baseX = i * SECTION_W + (i % 2 === 0 ? 30 : -30);
+    const h = hopHeights[i % hopHeights.length];
+    const w = 120 + (i % 4) * 30;
+    platforms.push({ x: baseX, y: h, w, h: 18 });
+  }
+
+  const TOWER_SPACING = 1300;
+  for (let i = 0; i * TOWER_SPACING < WORLD_W; i++) {
+    const towerX = 500 + i * TOWER_SPACING;
+    platforms.push({ x: towerX,       y: GROUND_Y - 520, w: 130, h: 18 });
+    platforms.push({ x: towerX + 190, y: GROUND_Y - 680, w: 130, h: 18 });
+    platforms.push({ x: towerX - 190, y: GROUND_Y - 840, w: 130, h: 18 });
+    platforms.push({ x: towerX,       y: GROUND_Y - 1000, w: 130, h: 18 });
+  }
 
   let currentUser = null;
   let myColor     = '#6ee7c8';
@@ -226,27 +279,23 @@
   // ── Aiming ──────────────────────────────────────────────────────────────
   // Aim direction is controlled with I (rotate left/counter-clockwise) and
   // P (rotate right/clockwise) instead of the mouse. 0 = facing right.
-  // The gun has weight: input changes angular velocity (not the angle
-  // directly), so it always keeps moving/coasting under I/P rather than
-  // snapping instantly or ever locking in place.
+  // Rotation is direct/instant from input — no inertia or coasting — so it
+  // always responds immediately to I/P.
   let aimAngle = 0;
-  let aimVel   = 0; // current angular velocity, radians/sec
-  const AIM_ROTATE_SPEED  = 3.2; // max radians per second
-  const AIM_ANGULAR_ACCEL = 16;  // radians/sec^2 — how quickly the gun spins up/down
-  const AIM_DAMPING       = 6;   // radians/sec^2 — how quickly velocity bleeds off with no input
+  const AIM_ROTATE_SPEED  = 3.2; // radians per second
 
   // ── Aim assist ──────────────────────────────────────────────────────────
   // Two mechanics, both only active when aim is already close to an alive
   // nearby player:
-  //  1. Slowdown — friction that reduces max turn speed/acceleration near
-  //     a target, so it takes more deliberate input to swing past them.
+  //  1. Slowdown — friction that reduces turn speed near a target, so it
+  //     takes more deliberate input to swing past them.
   //  2. Rotational tracking — a gentle continuous pull of the crosshair
   //     toward the target's current angle, independent of I/P input, so
   //     it keeps following them as they move instead of only reacting
   //     when you turn.
   const AIM_ASSIST_RANGE       = 420;  // only assists toward players within this distance
   const AIM_ASSIST_TOLERANCE   = 0.32; // radians — how close the aim has to be to kick in
-  const AIM_ASSIST_SLOWDOWN    = 0.6;  // fraction max speed/accel is reduced by at dead-on
+  const AIM_ASSIST_SLOWDOWN    = 0.6;  // fraction turn speed is reduced by at dead-on
   const AIM_ASSIST_TRACK_SPEED = 1.6;  // radians/sec the crosshair tracks the target at dead-on
 
   // Chat bubble over my own head
@@ -461,10 +510,13 @@
 
   // Solves for the launch angle (screen coords, +y = down) that lands a
   // gravity-affected shot on a target offset by (dx, dy), given bullet
-  // speed and gravity. This is the standard projectile "angle to hit a
-  // point" formula — picks the flatter (more direct) of the two solutions.
-  // Falls back to the plain straight-line angle if the target is out of
-  // range for the current speed/gravity (no real solution).
+  // speed and gravity. There are always two solutions for a reachable
+  // target — a direct low path and a lofted "into the sky" path that
+  // arcs up and over before landing on the same point — this picks the
+  // one with the shorter flight time, i.e. the direct path, not just the
+  // smaller angle (which doesn't reliably pick the direct one for every
+  // sign of dx). Falls back to the plain straight-line angle if the
+  // target is out of range for the current speed/gravity (no real solution).
   function solveLaunchAngle(dx, dy, speed, gravity) {
     if (Math.abs(dx) < 1) {
       return Math.atan2(dy, dx || 0.001);
@@ -495,8 +547,21 @@
 
     const theta1 = angleFromTan(t1);
     const theta2 = angleFromTan(t2);
-    // Prefer the flatter (smaller-magnitude) trajectory — the more direct shot.
-    return Math.abs(theta1) <= Math.abs(theta2) ? theta1 : theta2;
+
+    // Time to cross the horizontal gap dx at this angle: t = dx / (speed*cos(theta)).
+    // The direct path always arrives sooner than the lofted one — use that
+    // instead of angle magnitude, which picks the wrong branch for some dx signs.
+    function flightTime(theta) {
+      const vx = speed * Math.cos(theta);
+      if (Math.abs(vx) < 1e-6) return Infinity;
+      const t = dx / vx;
+      return t > 0 ? t : Infinity;
+    }
+
+    const time1 = flightTime(theta1);
+    const time2 = flightTime(theta2);
+    if (!isFinite(time1) && !isFinite(time2)) return Math.atan2(dy, dx);
+    return time1 <= time2 ? theta1 : theta2;
   }
 
   // Finds the nearest alive player whose gravity-compensated firing angle is
@@ -714,38 +779,21 @@
       }
       jumpKeyHeld = jumpKeyDown;
 
-      // Aim: I rotates counter-clockwise, P rotates clockwise. The gun has
-      // weight — I/P change angular velocity, not the angle directly — so
-      // it keeps drifting/coasting rather than snapping to a fixed speed.
+      // Aim: I rotates counter-clockwise, P rotates clockwise, instantly —
+      // no inertia or coasting, so it always tracks input exactly.
       const assist = findAimAssistTarget();
 
-      // Mechanic 1 — slowdown: friction that reduces max turn speed/accel
-      // the closer the aim already is to a target, so it takes more
-      // deliberate input to swing past them.
-      let maxSpeed = AIM_ROTATE_SPEED;
-      let accel = AIM_ANGULAR_ACCEL;
+      // Mechanic 1 — slowdown: friction that reduces turn speed the closer
+      // the aim already is to a target, so it takes more deliberate input
+      // to swing past them.
+      let rotateSpeed = AIM_ROTATE_SPEED;
       if (assist) {
         const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE; // 0..1, 1 = dead on
-        maxSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_SLOWDOWN * closeness);
-        accel = AIM_ANGULAR_ACCEL * (1 - AIM_ASSIST_SLOWDOWN * closeness);
+        rotateSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_SLOWDOWN * closeness);
       }
 
-      let inputDir = 0;
-      if (keys['i']) inputDir -= 1;
-      if (keys['p']) inputDir += 1;
-
-      if (inputDir !== 0) {
-        aimVel += inputDir * accel * dt;
-        aimVel = Math.max(-maxSpeed, Math.min(maxSpeed, aimVel));
-      } else {
-        // No input — bleed velocity off so the gun settles instead of
-        // spinning forever, but it still coasts a bit first (weight).
-        const damp = AIM_DAMPING * dt;
-        if (aimVel > 0) aimVel = Math.max(0, aimVel - damp);
-        else if (aimVel < 0) aimVel = Math.min(0, aimVel + damp);
-      }
-
-      aimAngle += aimVel * dt;
+      if (keys['i']) aimAngle -= rotateSpeed * dt;
+      if (keys['p']) aimAngle += rotateSpeed * dt;
 
       // Mechanic 2 — rotational tracking: separate from I/P input, gently
       // pulls the crosshair toward the target's current angle each frame,
@@ -1023,16 +1071,78 @@
     });
   }
 
+  // Draws an edge arrow pointing toward each alive player who is currently
+  // outside the camera's viewport, so they're never just "gone" off-screen
+  // in a world this big.
+  function drawOffscreenIndicators(viewW, viewH) {
+    const centerWX = camera.x + viewW / 2;
+    const centerWY = camera.y + viewH / 2;
+    const margin = 36;
+    const halfW = canvas.width / 2 - margin;
+    const halfH = canvas.height / 2 - margin;
+
+    others.forEach((p) => {
+      if (p.alive === false) return;
+      const visible = p.x >= camera.x && p.x <= camera.x + viewW &&
+                      p.y >= camera.y && p.y <= camera.y + viewH;
+      if (visible) return;
+
+      const dx = p.x - centerWX;
+      const dy = p.y - centerWY;
+      if (dx === 0 && dy === 0) return;
+      const angle = Math.atan2(dy, dx);
+
+      const scaleX = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+      const scaleY = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+      const scale = Math.min(scaleX, scaleY);
+
+      const sx = canvas.width / 2 + dx * scale;
+      const sy = canvas.height / 2 + dy * scale;
+      const color = p.color || '#6ea8ff';
+
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(angle);
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.moveTo(14, 0);
+      ctx.lineTo(-8, -8);
+      ctx.lineTo(-8, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      ctx.fillStyle = '#e9ebf1';
+      ctx.font = '11px Arial';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 3;
+      ctx.fillText(p.username || 'Anon', sx - Math.cos(angle) * 24, sy - Math.sin(angle) * 24 + 4);
+      ctx.shadowBlur = 0;
+    });
+  }
+
   function draw() {
-    ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+    updateCamera();
+    const viewW = canvas.width / ZOOM;
+    const viewH = canvas.height / ZOOM;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.scale(ZOOM, ZOOM);
+    ctx.translate(-camera.x, -camera.y);
 
     ctx.strokeStyle = 'rgba(255,255,255,0.04)';
     ctx.lineWidth   = 1;
-    for (let gx = 0; gx < WORLD_W; gx += 40) {
-      ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, WORLD_H); ctx.stroke();
+    const gridStartX = Math.floor(camera.x / 40) * 40;
+    const gridStartY = Math.floor(camera.y / 40) * 40;
+    for (let gx = gridStartX; gx < camera.x + viewW; gx += 40) {
+      ctx.beginPath(); ctx.moveTo(gx, camera.y); ctx.lineTo(gx, camera.y + viewH); ctx.stroke();
     }
-    for (let gy = 0; gy < WORLD_H; gy += 40) {
-      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
+    for (let gy = gridStartY; gy < camera.y + viewH; gy += 40) {
+      ctx.beginPath(); ctx.moveTo(camera.x, gy); ctx.lineTo(camera.x + viewW, gy); ctx.stroke();
     }
 
     platforms.forEach((p) => {
@@ -1065,17 +1175,21 @@
       drawChatBubble(me.x, me.y, myChatBubbleText, nowPerf - myChatBubbleAt);
     }
 
+    ctx.restore();
+
+    drawOffscreenIndicators(viewW, viewH);
+
     if (!myAlive) {
       const secsLeft = Math.max(0, (respawnAt - performance.now()) / 1000);
       ctx.fillStyle = 'rgba(10,12,16,0.55)';
-      ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#ff6b6b';
       ctx.font = 'bold 28px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText('You died', WORLD_W / 2, WORLD_H / 2 - 10);
+      ctx.fillText('You died', canvas.width / 2, canvas.height / 2 - 10);
       ctx.fillStyle = '#e9ebf1';
       ctx.font = '15px Arial';
-      ctx.fillText(`Respawning in ${secsLeft.toFixed(1)}s`, WORLD_W / 2, WORLD_H / 2 + 20);
+      ctx.fillText(`Respawning in ${secsLeft.toFixed(1)}s`, canvas.width / 2, canvas.height / 2 + 20);
     }
 
     $playerCount.textContent = liveCount;
