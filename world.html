@@ -83,7 +83,7 @@
   <p><a href="index.html">Sign in on OpenHub</a>, then come back here.</p>
 </div>
 
-<p class="hint">Move with <strong>WASD</strong> or <strong>Arrow Keys</strong>. Players online: <span id="playerCount">0</span></p>
+<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air). Players online: <span id="playerCount">0</span></p>
 
 <script>
 (function () {
@@ -103,18 +103,38 @@
   const WORLD_W       = canvas.width;
   const WORLD_H       = canvas.height;
   const PLAYER_SIZE   = 24;
-  const SPEED         = 220;       // px per second
+  const MOVE_SPEED    = 220;       // horizontal px per second
+  const GRAVITY       = 1400;      // px per second^2
+  const JUMP_VELOCITY = -560;      // px per second (negative = up)
+  const DOUBLE_JUMP_VELOCITY = -480;
+  const MAX_FALL_SPEED = 900;
   const BROADCAST_HZ  = 20;        // broadcast ticks per second (50ms) — pure pub/sub, zero DB writes during movement
   const DB_SYNC_MS    = 3000;      // write to DB every 3s just to keep presence alive for join-late players
   const STALE_MS      = 15000;     // remove players silent for this long
   const LERP_FACTOR   = 0.18;      // interpolation per frame for other players — tune 0.10 (smoother) – 0.25 (snappier)
 
+  // ── Platforms (solid ground the player can stand on / land on) ─────────────
+  // x,y = top-left corner. Player rests with feet on top surface (y).
+  const GROUND_Y = WORLD_H - 40;
+  const platforms = [
+    { x: 0,   y: GROUND_Y, w: WORLD_W, h: 40 },   // floor spanning the world
+    { x: 120, y: 460,      w: 160,     h: 18 },
+    { x: 360, y: 380,      w: 140,     h: 18 },
+    { x: 580, y: 300,      w: 160,     h: 18 },
+    { x: 340, y: 220,      w: 120,     h: 18 },
+    { x: 60,  y: 260,      w: 120,     h: 18 },
+    { x: 700, y: 460,      w: 140,     h: 18 }
+  ];
+
   let currentUser = null;
   let myColor     = '#6ee7c8';
   let myUsername  = 'Anon';
 
-  // Own position — authoritative, client-predicted
-  let me = { x: WORLD_W / 2, y: WORLD_H / 2 };
+  // Own position — authoritative, client-predicted. vy = vertical velocity.
+  let me = { x: WORLD_W / 2, y: GROUND_Y - PLAYER_SIZE / 2, vy: 0 };
+  let onGround   = false;
+  let jumpsUsed  = 0;           // 0 = none used, 1 = first jump, 2 = double jump used
+  let jumpKeyHeld = false;      // edge-trigger so holding jump doesn't spam
 
   // Other players: id → { username, color, x, y, tx, ty, updated_at }
   //   x/y  = interpolated render position
@@ -160,7 +180,8 @@
     myUsername = (profile && profile.username) ? profile.username : 'Anon';
     myColor    = randomColor(currentUser.id);
     me.x       = 100 + Math.random() * (WORLD_W - 200);
-    me.y       = 100 + Math.random() * (WORLD_H - 200);
+    me.y       = GROUND_Y - PLAYER_SIZE / 2;
+    me.vy      = 0;
 
     // Initial DB presence row
     await supabaseClient.from('world_players').upsert({
@@ -276,19 +297,58 @@
     const dt = Math.min((now - lastFrame) / 1000, 0.05);
     lastFrame = now;
 
-    // ── Own movement (client predicted) ──────────────────────────────────────
-    let dx = 0, dy = 0;
-    if (keys['w'] || keys['arrowup'])    dy -= 1;
-    if (keys['s'] || keys['arrowdown'])  dy += 1;
+    // ── Horizontal input ────────────────────────────────────────────────────
+    let dx = 0;
     if (keys['a'] || keys['arrowleft'])  dx -= 1;
     if (keys['d'] || keys['arrowright']) dx += 1;
+    me.x = me.x + dx * MOVE_SPEED * dt;
+    me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x));
 
-    if (dx !== 0 || dy !== 0) {
-      const len = Math.sqrt(dx * dx + dy * dy);
-      dx /= len; dy /= len;
-      me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x + dx * SPEED * dt));
-      me.y = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_H - PLAYER_SIZE / 2, me.y + dy * SPEED * dt));
+    // ── Jump input (edge-triggered — a single press = one jump attempt) ─────
+    const jumpKeyDown = keys['w'] || keys['arrowup'] || keys[' '];
+    if (jumpKeyDown && !jumpKeyHeld) {
+      if (onGround) {
+        me.vy = JUMP_VELOCITY;
+        onGround = false;
+        jumpsUsed = 1;
+      } else if (jumpsUsed === 1) {
+        me.vy = DOUBLE_JUMP_VELOCITY;
+        jumpsUsed = 2;
+      }
     }
+    jumpKeyHeld = jumpKeyDown;
+
+    // ── Gravity + vertical motion ────────────────────────────────────────────
+    me.vy = Math.min(me.vy + GRAVITY * dt, MAX_FALL_SPEED);
+    const prevBottom = me.y + PLAYER_SIZE / 2;
+    me.y += me.vy * dt;
+
+    // ── Platform collision (only land on solid ground from above) ───────────
+    onGround = false;
+    const half = PLAYER_SIZE / 2;
+    const feetY = me.y + half;
+    const left  = me.x - half * 0.8;   // slightly narrower hitbox for forgiving edges
+    const right = me.x + half * 0.8;
+
+    for (const p of platforms) {
+      const withinX = right > p.x && left < p.x + p.w;
+      if (!withinX) continue;
+      const platTop = p.y;
+      // Only snap to the platform if we were above it last frame and are now
+      // at/below its surface while falling (vy >= 0) — prevents snapping when
+      // jumping up through a platform from below.
+      if (me.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
+        me.y = platTop - half;
+        me.vy = 0;
+        onGround = true;
+        jumpsUsed = 0;
+        break;
+      }
+    }
+
+    // World bounds — don't fall through the floor platform, don't fly off top
+    if (me.y - half < 0) { me.y = half; me.vy = Math.max(me.vy, 0); }
+    if (me.y + half > WORLD_H) { me.y = WORLD_H - half; me.vy = 0; onGround = true; jumpsUsed = 0; }
 
     // ── Interpolate other players toward their broadcast target ───────────────
     const nowMs = Date.now();
@@ -348,6 +408,14 @@
     for (let gy = 0; gy < WORLD_H; gy += 40) {
       ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
     }
+
+    // Platforms
+    platforms.forEach((p) => {
+      ctx.fillStyle = '#343947';
+      ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.fillStyle = '#4a5066';
+      ctx.fillRect(p.x, p.y, p.w, 4);
+    });
 
     let liveCount = 1;
     others.forEach((p) => {
