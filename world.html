@@ -179,7 +179,7 @@
   const MAX_FALL_SPEED = 900;
   const BROADCAST_HZ  = 20;        // broadcast ticks per second (50ms) — pure pub/sub, zero DB writes during movement
   const DB_SYNC_MS    = 3000;      // write to DB every 3s just to keep presence alive for join-late players
-  const STALE_MS      = 15000;     // remove players silent for this long
+  const STALE_MS      = 20000;     // remove players silent this long (must exceed HEARTBEAT_MS with margin)
   const LERP_FACTOR   = 0.18;      // interpolation per frame for other players — tune 0.10 (smoother) – 0.25 (snappier)
 
   // ── Combat ────────────────────────────────────────────────────────────────
@@ -533,11 +533,22 @@
       });
 
     let lastBroadcast = { x: null, y: null, health: null, alive: null };
+    let lastHeartbeatAt = 0;
+    const HEARTBEAT_MS = 4000; // resend presence at least this often even if perfectly still
+
     setInterval(() => {
       if (!currentUser) return;
-      if (lastBroadcast.x === me.x && lastBroadcast.y === me.y &&
-          lastBroadcast.health === myHealth && lastBroadcast.alive === myAlive) return;
+      const unchanged =
+        lastBroadcast.x === me.x && lastBroadcast.y === me.y &&
+        lastBroadcast.health === myHealth && lastBroadcast.alive === myAlive;
+
+      // Skip only if nothing changed AND we've heartbeated recently — an idle
+      // player still needs a periodic resend or everyone else's stale-timer
+      // will expire them and they'll vanish from other clients.
+      if (unchanged && (Date.now() - lastHeartbeatAt) < HEARTBEAT_MS) return;
+
       lastBroadcast = { x: me.x, y: me.y, health: myHealth, alive: myAlive };
+      lastHeartbeatAt = Date.now();
       broadcastChannel.send({
         type:    'broadcast',
         event:   'move',
@@ -553,6 +564,9 @@
       });
     }, Math.floor(1000 / BROADCAST_HZ));
 
+    // Runs unconditionally (not just on movement) so a player standing still
+    // still keeps a fresh updated_at in the DB for anyone who loads the page
+    // fresh and seeds from the snapshot.
     setInterval(async () => {
       if (!currentUser) return;
       await supabaseClient.from('world_players').update({
@@ -570,7 +584,12 @@
       supabaseClient.from('world_players').delete().eq('id', currentUser.id);
     });
 
-    requestAnimationFrame(loop);
+    // setInterval (not requestAnimationFrame) so the simulation — bullets,
+    // hit detection, damage — keeps running even when this tab is in the
+    // background. Browsers fully pause rAF on hidden tabs, which let players
+    // dodge damage just by switching away; setInterval is only throttled
+    // (typically to ~1 tick/sec) but never stops outright.
+    setInterval(loop, 16);
   }
 
   // ─── Game loop ───────────────────────────────────────────────────────────────
@@ -625,7 +644,8 @@
     if (me.y + half > WORLD_H) { me.y = WORLD_H - half; me.vy = 0; onGround = true; jumpsUsed = 0; }
   }
 
-  function loop(now) {
+  function loop() {
+    const now = performance.now();
     const dt = Math.min((now - lastFrame) / 1000, 0.05);
     lastFrame = now;
 
@@ -659,7 +679,6 @@
     updateBullets(dt);
 
     draw();
-    requestAnimationFrame(loop);
   }
 
   function updateBullets(dt) {
