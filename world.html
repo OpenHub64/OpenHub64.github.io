@@ -148,7 +148,7 @@
   <p><a href="index.html">Sign in on OpenHub</a>, then come back here.</p>
 </div>
 
-<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air), <strong>O/P</strong> to aim, <strong>[</strong> or <strong>click</strong> to shoot, <strong>Enter</strong> to chat. Players online: <span id="playerCount">0</span></p>
+<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air), <strong>I/P</strong> to aim, <strong>O</strong> or <strong>click</strong> to shoot, <strong>Enter</strong> to chat. Players online: <span id="playerCount">0</span></p>
 
 <script>
 (function () {
@@ -224,10 +224,10 @@
   let lastShotAt = 0;
 
   // ── Aiming ──────────────────────────────────────────────────────────────
-  // Aim direction is controlled with O (rotate left/counter-clockwise) and
+  // Aim direction is controlled with I (rotate left/counter-clockwise) and
   // P (rotate right/clockwise) instead of the mouse. 0 = facing right.
   // The gun has weight: input changes angular velocity (not the angle
-  // directly), so it always keeps moving/coasting under O/P rather than
+  // directly), so it always keeps moving/coasting under I/P rather than
   // snapping instantly or ever locking in place.
   let aimAngle = 0;
   let aimVel   = 0; // current angular velocity, radians/sec
@@ -236,15 +236,18 @@
   const AIM_DAMPING       = 6;   // radians/sec^2 — how quickly velocity bleeds off with no input
 
   // ── Aim assist ──────────────────────────────────────────────────────────
-  // When aim is already close to an alive nearby player, the gun just feels
-  // heavier (slower to spin up, lower top speed) — O/P still always move
-  // it, it never locks or snaps on its own. Separately, firing a shot while
-  // near a target nudges that shot (and the visible aim) a bit closer to
-  // them, like a one-time snap rather than a constant magnet.
-  const AIM_ASSIST_RANGE      = 420;  // only assists toward players within this distance
-  const AIM_ASSIST_TOLERANCE  = 0.32; // radians — how close the aim has to be to kick in
-  const AIM_ASSIST_WEIGHT     = 0.6;  // fraction accel/top-speed is reduced by at dead-on
-  const AIM_ASSIST_SHOOT_PULL = 0.35; // fraction of the remaining angle gap closed on each shot
+  // Two mechanics, both only active when aim is already close to an alive
+  // nearby player:
+  //  1. Slowdown — friction that reduces max turn speed/acceleration near
+  //     a target, so it takes more deliberate input to swing past them.
+  //  2. Rotational tracking — a gentle continuous pull of the crosshair
+  //     toward the target's current angle, independent of I/P input, so
+  //     it keeps following them as they move instead of only reacting
+  //     when you turn.
+  const AIM_ASSIST_RANGE       = 420;  // only assists toward players within this distance
+  const AIM_ASSIST_TOLERANCE   = 0.32; // radians — how close the aim has to be to kick in
+  const AIM_ASSIST_SLOWDOWN    = 0.6;  // fraction max speed/accel is reduced by at dead-on
+  const AIM_ASSIST_TRACK_SPEED = 1.6;  // radians/sec the crosshair tracks the target at dead-on
 
   // Chat bubble over my own head
   let myChatBubbleText = '';
@@ -265,24 +268,13 @@
     if (now - lastShotAt < SHOOT_COOLDOWN_MS) return;
     lastShotAt = now;
 
-    // If a nearby player is close to where we're aiming, nudge the aim (and
-    // this shot) a bit closer to them — fired only on shots, not a
-    // continuous magnet, so it reads as "the gun kicked toward them" rather
-    // than the reticle being glued to a target.
-    const assist = findAimAssistTarget();
-    if (assist) {
-      const gap = angleDiff(aimAngle, assist.angle);
-      aimAngle += gap * AIM_ASSIST_SHOOT_PULL;
-      aimVel = 0; // the nudge overrides any current spin so they don't fight
-    }
-
     spawnBullet(currentUser.id, me.x, me.y, aimAngle, myColor, true);
   }
 
   canvas.addEventListener('mousedown', tryShoot);
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === '[') {
+    if (e.key.toLowerCase() === 'o') {
       if (document.activeElement === $chatInput) return;
       e.preventDefault();
       tryShoot();
@@ -722,22 +714,24 @@
       }
       jumpKeyHeld = jumpKeyDown;
 
-      // Aim: O rotates counter-clockwise, P rotates clockwise. The gun has
-      // weight — O/P change angular velocity, not the angle directly — so
+      // Aim: I rotates counter-clockwise, P rotates clockwise. The gun has
+      // weight — I/P change angular velocity, not the angle directly — so
       // it keeps drifting/coasting rather than snapping to a fixed speed.
-      // Aim assist: near a target the gun just gets heavier (slower to
-      // accelerate, lower top speed); it never stops responding to input.
       const assist = findAimAssistTarget();
+
+      // Mechanic 1 — slowdown: friction that reduces max turn speed/accel
+      // the closer the aim already is to a target, so it takes more
+      // deliberate input to swing past them.
       let maxSpeed = AIM_ROTATE_SPEED;
       let accel = AIM_ANGULAR_ACCEL;
       if (assist) {
         const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE; // 0..1, 1 = dead on
-        maxSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_WEIGHT * closeness);
-        accel = AIM_ANGULAR_ACCEL * (1 - AIM_ASSIST_WEIGHT * closeness);
+        maxSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_SLOWDOWN * closeness);
+        accel = AIM_ANGULAR_ACCEL * (1 - AIM_ASSIST_SLOWDOWN * closeness);
       }
 
       let inputDir = 0;
-      if (keys['o']) inputDir -= 1;
+      if (keys['i']) inputDir -= 1;
       if (keys['p']) inputDir += 1;
 
       if (inputDir !== 0) {
@@ -752,6 +746,17 @@
       }
 
       aimAngle += aimVel * dt;
+
+      // Mechanic 2 — rotational tracking: separate from I/P input, gently
+      // pulls the crosshair toward the target's current angle each frame,
+      // so it keeps following a moving enemy rather than only reacting
+      // when the player turns.
+      if (assist) {
+        const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE;
+        const gap = angleDiff(aimAngle, assist.angle);
+        const maxTrack = AIM_ASSIST_TRACK_SPEED * closeness * dt;
+        aimAngle += Math.max(-maxTrack, Math.min(maxTrack, gap));
+      }
 
       // keep in a tidy -PI..PI range
       if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
