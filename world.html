@@ -61,9 +61,7 @@
   .hint {
     margin-top: 0.75rem; color: var(--muted); font-size: 0.85rem; text-align: center;
   }
-  #playerCount {
-    color: var(--accent);
-  }
+  #playerCount { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -91,43 +89,54 @@
 (function () {
   "use strict";
 
-  const SUPABASE_URL = 'https://paifmufeevsdgvepewex.supabase.co';
+  const SUPABASE_URL      = 'https://paifmufeevsdgvepewex.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
-  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const supabaseClient    = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  const $status = document.getElementById('status');
-  const $gameWrap = document.getElementById('gameWrap');
-  const $loginGate = document.getElementById('loginGate');
+  const $status      = document.getElementById('status');
+  const $gameWrap    = document.getElementById('gameWrap');
+  const $loginGate   = document.getElementById('loginGate');
   const $playerCount = document.getElementById('playerCount');
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
+  const canvas       = document.getElementById('game');
+  const ctx          = canvas.getContext('2d');
 
-  const WORLD_W = canvas.width;
-  const WORLD_H = canvas.height;
-  const PLAYER_SIZE = 24;
-  const SPEED = 220; // px per second
-  const SEND_INTERVAL_MS = 80;
-  const STALE_MS = 15000; // hide players not heard from in this long
+  const WORLD_W       = canvas.width;
+  const WORLD_H       = canvas.height;
+  const PLAYER_SIZE   = 24;
+  const SPEED         = 220;       // px per second
+  const BROADCAST_HZ  = 20;        // broadcast ticks per second (50ms) — pure pub/sub, zero DB writes during movement
+  const DB_SYNC_MS    = 3000;      // write to DB every 3s just to keep presence alive for join-late players
+  const STALE_MS      = 15000;     // remove players silent for this long
+  const LERP_FACTOR   = 0.18;      // interpolation per frame for other players — tune 0.10 (smoother) – 0.25 (snappier)
 
   let currentUser = null;
-  let myColor = '#6ee7c8';
-  let myUsername = 'Anon';
+  let myColor     = '#6ee7c8';
+  let myUsername  = 'Anon';
 
-  // local predicted position
+  // Own position — authoritative, client-predicted
   let me = { x: WORLD_W / 2, y: WORLD_H / 2 };
-  const others = new Map(); // id -> { username, color, x, y, updated_at }
 
+  // Other players: id → { username, color, x, y, tx, ty, updated_at }
+  //   x/y  = interpolated render position
+  //   tx/ty = target position received from broadcast
+  const others = new Map();
+
+  // ─── Input ───────────────────────────────────────────────────────────────────
   const keys = Object.create(null);
   window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
-  window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+  window.addEventListener('keyup',   (e) => { keys[e.key.toLowerCase()] = false; });
 
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
   function randomColor(seed) {
-    const colors = ['#6ee7c8', '#ff6b6b', '#ffd166', '#6ea8ff', '#c792ea', '#ff9f6e', '#7ee787'];
+    const colors = ['#6ee7c8','#ff6b6b','#ffd166','#6ea8ff','#c792ea','#ff9f6e','#7ee787'];
     let h = 0;
     for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
     return colors[h % colors.length];
   }
 
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  // ─── Initialisation ──────────────────────────────────────────────────────────
   async function init() {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (!session) {
@@ -138,9 +147,10 @@
 
     currentUser = session.user;
     $loginGate.style.display = 'none';
-    $gameWrap.style.display = 'block';
-    $status.textContent = 'Loading your profile…';
+    $gameWrap.style.display  = 'block';
+    $status.textContent      = 'Loading your profile…';
 
+    // Fetch own profile
     const { data: profile } = await supabaseClient
       .from('profiles')
       .select('username')
@@ -148,74 +158,129 @@
       .single();
 
     myUsername = (profile && profile.username) ? profile.username : 'Anon';
-    myColor = randomColor(currentUser.id);
-    me.x = 100 + Math.random() * (WORLD_W - 200);
-    me.y = 100 + Math.random() * (WORLD_H - 200);
+    myColor    = randomColor(currentUser.id);
+    me.x       = 100 + Math.random() * (WORLD_W - 200);
+    me.y       = 100 + Math.random() * (WORLD_H - 200);
 
+    // Initial DB presence row
     await supabaseClient.from('world_players').upsert({
-      id: currentUser.id,
-      username: myUsername,
-      color: myColor,
-      x: me.x,
-      y: me.y,
+      id:         currentUser.id,
+      username:   myUsername,
+      color:      myColor,
+      x:          me.x,
+      y:          me.y,
       updated_at: new Date().toISOString()
     });
 
+    // Seed other players from DB snapshot (for late joiners)
     const { data: existing } = await supabaseClient.from('world_players').select('*');
     if (existing) {
       existing.forEach((row) => {
-        if (row.id !== currentUser.id) {
-          others.set(row.id, row);
-        }
+        if (row.id === currentUser.id) return;
+        others.set(row.id, { ...row, tx: row.x, ty: row.y });
       });
     }
 
-    supabaseClient
-      .channel('world_players_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'world_players' }, (payload) => {
-        if (payload.eventType === 'DELETE') {
-          others.delete(payload.old.id);
-          return;
+    // ── Realtime broadcast channel (no DB round-trip per move) ──────────────
+    // Broadcast carries position at ~20 Hz. This is a pure WebSocket pub/sub
+    // message — it does NOT hit Postgres and has ~5–15ms latency vs 80–300ms
+    // for postgres_changes.
+    const broadcastChannel = supabaseClient.channel('world:movement', {
+      config: { broadcast: { self: false } }
+    });
+
+    broadcastChannel
+      .on('broadcast', { event: 'move' }, ({ payload }) => {
+        const { id, username, color, x, y } = payload;
+        if (id === currentUser.id) return;
+
+        const existing = others.get(id);
+        if (existing) {
+          // Update target; interpolation will glide render position toward it
+          existing.tx = x;
+          existing.ty = y;
+          existing.username   = username;
+          existing.color      = color;
+          existing.updated_at = Date.now();
+        } else {
+          // First time seeing this player — snap immediately, no lerp jump
+          others.set(id, {
+            id, username, color,
+            x, y,       // render starts at target
+            tx: x, ty: y,
+            updated_at: Date.now()
+          });
         }
-        const row = payload.new;
-        if (row.id === currentUser.id) return;
-        others.set(row.id, row);
       })
-      .subscribe((subStatus) => {
-        if (subStatus === 'SUBSCRIBED') {
-          $status.textContent = 'Connected. You are ' + myUsername + '.';
+      // Also watch DB changes for join/leave events (presence) and late-joiner sync
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'world_players' }, ({ old: o }) => {
+        others.delete(o.id);
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'world_players' }, ({ new: row }) => {
+        if (row.id === currentUser.id) return;
+        if (!others.has(row.id)) {
+          others.set(row.id, { ...row, tx: row.x, ty: row.y });
+        }
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          $status.textContent = `Connected. You are ${myUsername}.`;
         }
       });
 
+    // ── Broadcast loop (high-frequency, no DB) ───────────────────────────────
+    let lastBroadcast = { x: null, y: null };
+    setInterval(() => {
+      if (!currentUser) return;
+      if (lastBroadcast.x === me.x && lastBroadcast.y === me.y) return;
+      lastBroadcast = { x: me.x, y: me.y };
+      broadcastChannel.send({
+        type:    'broadcast',
+        event:   'move',
+        payload: {
+          id:       currentUser.id,
+          username: myUsername,
+          color:    myColor,
+          x:        Math.round(me.x * 100) / 100,
+          y:        Math.round(me.y * 100) / 100
+        }
+      });
+    }, Math.floor(1000 / BROADCAST_HZ));
+
+    // ── Slow DB sync (keep presence alive for late joiners) ──────────────────
+    setInterval(async () => {
+      if (!currentUser) return;
+      await supabaseClient.from('world_players').update({
+        x:          me.x,
+        y:          me.y,
+        updated_at: new Date().toISOString()
+      }).eq('id', currentUser.id);
+    }, DB_SYNC_MS);
+
+    // ── Cleanup on tab close ──────────────────────────────────────────────────
     window.addEventListener('beforeunload', () => {
-      navigator.sendBeacon && supabaseClient.from('world_players').delete().eq('id', currentUser.id);
+      broadcastChannel.send({
+        type: 'broadcast', event: 'leave',
+        payload: { id: currentUser.id }
+      });
+      supabaseClient.from('world_players').delete().eq('id', currentUser.id);
     });
 
     requestAnimationFrame(loop);
-    setInterval(sendPosition, SEND_INTERVAL_MS);
   }
 
-  let lastSent = { x: null, y: null };
-  async function sendPosition() {
-    if (!currentUser) return;
-    if (lastSent.x === me.x && lastSent.y === me.y) return;
-    lastSent = { x: me.x, y: me.y };
-    await supabaseClient.from('world_players').update({
-      x: me.x,
-      y: me.y,
-      updated_at: new Date().toISOString()
-    }).eq('id', currentUser.id);
-  }
-
+  // ─── Game loop ───────────────────────────────────────────────────────────────
   let lastFrame = performance.now();
+
   function loop(now) {
     const dt = Math.min((now - lastFrame) / 1000, 0.05);
     lastFrame = now;
 
+    // ── Own movement (client predicted) ──────────────────────────────────────
     let dx = 0, dy = 0;
-    if (keys['w'] || keys['arrowup']) dy -= 1;
-    if (keys['s'] || keys['arrowdown']) dy += 1;
-    if (keys['a'] || keys['arrowleft']) dx -= 1;
+    if (keys['w'] || keys['arrowup'])    dy -= 1;
+    if (keys['s'] || keys['arrowdown'])  dy += 1;
+    if (keys['a'] || keys['arrowleft'])  dx -= 1;
     if (keys['d'] || keys['arrowright']) dx += 1;
 
     if (dx !== 0 || dy !== 0) {
@@ -225,31 +290,58 @@
       me.y = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_H - PLAYER_SIZE / 2, me.y + dy * SPEED * dt));
     }
 
+    // ── Interpolate other players toward their broadcast target ───────────────
+    const nowMs = Date.now();
+    others.forEach((p, id) => {
+      // Stale check — if we haven't heard from them in a while, remove
+      if (nowMs - p.updated_at > STALE_MS) {
+        others.delete(id);
+        return;
+      }
+      // Lerp render position toward target
+      p.x = lerp(p.x, p.tx, LERP_FACTOR);
+      p.y = lerp(p.y, p.ty, LERP_FACTOR);
+    });
+
     draw();
     requestAnimationFrame(loop);
   }
 
+  // ─── Rendering ───────────────────────────────────────────────────────────────
   function drawPlayer(x, y, color, label, isMe) {
+    // Shadow
+    ctx.shadowColor   = isMe ? 'rgba(110,231,200,0.35)' : 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur    = isMe ? 12 : 6;
+
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(x, y, PLAYER_SIZE / 2, 0, Math.PI * 2);
     ctx.fill();
+
     if (isMe) {
       ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
+      ctx.lineWidth   = 2;
       ctx.stroke();
     }
-    ctx.fillStyle = '#e9ebf1';
-    ctx.font = '12px Arial';
-    ctx.textAlign = 'center';
+
+    ctx.shadowBlur = 0;
+
+    // Username label
+    ctx.fillStyle   = '#e9ebf1';
+    ctx.font        = '12px Arial';
+    ctx.textAlign   = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur  = 4;
     ctx.fillText(label, x, y - PLAYER_SIZE / 2 - 6);
+    ctx.shadowBlur  = 0;
   }
 
   function draw() {
     ctx.clearRect(0, 0, WORLD_W, WORLD_H);
 
-    // simple grid background
+    // Grid background
     ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth   = 1;
     for (let gx = 0; gx < WORLD_W; gx += 40) {
       ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, WORLD_H); ctx.stroke();
     }
@@ -257,11 +349,8 @@
       ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
     }
 
-    const now = Date.now();
     let liveCount = 1;
     others.forEach((p) => {
-      const age = now - new Date(p.updated_at).getTime();
-      if (age > STALE_MS) return;
       liveCount++;
       drawPlayer(p.x, p.y, p.color || '#6ea8ff', p.username || 'Anon', false);
     });
