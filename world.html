@@ -52,6 +52,62 @@
     touch-action: none;
     cursor: crosshair;
   }
+
+  /* ── Chat box: bottom-left overlay on the game canvas ─────────────────── */
+  #chatBox {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    width: min(320px, 42%);
+    display: flex;
+    flex-direction: column;
+    background: rgba(20,22,28,0.72);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    backdrop-filter: blur(2px);
+    font-size: 0.8rem;
+  }
+  #chatLog {
+    max-height: 140px;
+    overflow-y: auto;
+    padding: 0.5rem 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    scrollbar-width: thin;
+  }
+  .chat-line { line-height: 1.35; word-break: break-word; }
+  .chat-name { font-weight: bold; }
+  .chat-text { color: var(--text); }
+  .chat-system { color: var(--muted); font-style: italic; }
+  .chat-whisper { color: #c792ea; font-style: italic; }
+  #chatInputRow {
+    display: flex;
+    border-top: 1px solid var(--border);
+  }
+  #chatInput {
+    flex: 1;
+    background: rgba(0,0,0,0.25);
+    border: none;
+    color: var(--text);
+    padding: 0.45rem 0.6rem;
+    font-size: 0.8rem;
+    font-family: inherit;
+    outline: none;
+  }
+  #chatInput::placeholder { color: var(--muted); }
+  #chatSendBtn {
+    background: var(--accent);
+    color: #10221c;
+    border: none;
+    font-weight: bold;
+    font-size: 0.8rem;
+    padding: 0 0.8rem;
+    cursor: pointer;
+  }
+  #chatSendBtn:hover { background: #85f0d4; }
+
   #loginGate {
     max-width: 400px; width: 100%;
     background: var(--panel); border: 1px solid var(--border);
@@ -77,6 +133,14 @@
 
 <div id="gameWrap" style="display:none;">
   <canvas id="game" width="900" height="600"></canvas>
+
+  <div id="chatBox">
+    <div id="chatLog"></div>
+    <div id="chatInputRow">
+      <input id="chatInput" type="text" maxlength="200" placeholder="Press Enter to chat… (/w user msg, /clear)">
+      <button id="chatSendBtn" type="button">Send</button>
+    </div>
+  </div>
 </div>
 
 <div id="loginGate">
@@ -84,7 +148,7 @@
   <p><a href="index.html">Sign in on OpenHub</a>, then come back here.</p>
 </div>
 
-<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air), <strong>click</strong> to shoot. Players online: <span id="playerCount">0</span></p>
+<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air), <strong>click</strong> to shoot, <strong>Enter</strong> to chat. Players online: <span id="playerCount">0</span></p>
 
 <script>
 (function () {
@@ -100,6 +164,10 @@
   const $playerCount = document.getElementById('playerCount');
   const canvas       = document.getElementById('game');
   const ctx          = canvas.getContext('2d');
+
+  const $chatLog     = document.getElementById('chatLog');
+  const $chatInput   = document.getElementById('chatInput');
+  const $chatSendBtn = document.getElementById('chatSendBtn');
 
   const WORLD_W       = canvas.width;
   const WORLD_H       = canvas.height;
@@ -124,11 +192,14 @@
   const RESPAWN_MS       = 2500;
   const SHOOT_COOLDOWN_MS = 220;
 
+  // ── Chat ─────────────────────────────────────────────────────────────────
+  const CHAT_BUBBLE_MS = 2500;   // how long a chat bubble stays over a player's head
+  const CHAT_LOG_MAX   = 200;    // cap local chat log length
+
   // ── Platforms (solid ground the player can stand on / land on) ─────────────
-  // x,y = top-left corner. Player rests with feet on top surface (y).
   const GROUND_Y = WORLD_H - 40;
   const platforms = [
-    { x: 0,   y: GROUND_Y, w: WORLD_W, h: 40 },   // floor spanning the world
+    { x: 0,   y: GROUND_Y, w: WORLD_W, h: 40 },
     { x: 120, y: 460,      w: 160,     h: 18 },
     { x: 360, y: 380,      w: 140,     h: 18 },
     { x: 580, y: 300,      w: 160,     h: 18 },
@@ -141,32 +212,31 @@
   let myColor     = '#6ee7c8';
   let myUsername  = 'Anon';
 
-  // Own position — authoritative, client-predicted. vy = vertical velocity.
   let me = { x: WORLD_W / 2, y: GROUND_Y - PLAYER_SIZE / 2, vy: 0 };
   let onGround   = false;
-  let jumpsUsed  = 0;           // 0 = none used, 1 = first jump, 2 = double jump used
-  let jumpKeyHeld = false;      // edge-trigger so holding jump doesn't spam
+  let jumpsUsed  = 0;
+  let jumpKeyHeld = false;
 
-  // Combat state (self-authoritative — I own my own health)
   let myHealth   = MAX_HEALTH;
   let myAlive    = true;
   let respawnAt  = 0;
   let lastShotAt = 0;
 
-  // Bullets in flight: id → { ownerId, x, y, vx, vy, spawnedAt, color }
+  // Chat bubble over my own head
+  let myChatBubbleText = '';
+  let myChatBubbleAt   = 0;
+
   const bullets = new Map();
   let bulletSeq = 0;
 
-  // Other players: id → { username, color, x, y, tx, ty, updated_at, health, alive }
-  //   x/y  = interpolated render position
-  //   tx/ty = target position received from broadcast
+  // id → { username, color, x, y, tx, ty, updated_at, health, alive, chatText, chatAt }
   const others = new Map();
 
-  // ─── Mouse / shooting ──────────────────────────────────────────────────────
   let broadcastChannelRef = null;
 
   canvas.addEventListener('mousedown', (e) => {
     if (!currentUser || !myAlive) return;
+    if (document.activeElement === $chatInput) return; // don't shoot while typing
     const now = performance.now();
     if (now - lastShotAt < SHOOT_COOLDOWN_MS) return;
     lastShotAt = now;
@@ -199,10 +269,147 @@
     }
   }
 
-  // ─── Input ───────────────────────────────────────────────────────────────────
+  // ─── Chat helpers ────────────────────────────────────────────────────────────
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function appendChatLine(html) {
+    const line = document.createElement('div');
+    line.className = 'chat-line';
+    line.innerHTML = html;
+    $chatLog.appendChild(line);
+    while ($chatLog.children.length > CHAT_LOG_MAX) {
+      $chatLog.removeChild($chatLog.firstChild);
+    }
+    $chatLog.scrollTop = $chatLog.scrollHeight;
+  }
+
+  function showBubbleFor(id, text) {
+    if (currentUser && id === currentUser.id) {
+      myChatBubbleText = text;
+      myChatBubbleAt = performance.now();
+      return;
+    }
+    const p = others.get(id);
+    if (p) {
+      p.chatText = text;
+      p.chatAt = performance.now();
+    }
+  }
+
+  function sendChatMessage() {
+    const raw = $chatInput.value.trim();
+    if (!raw || !currentUser || !broadcastChannelRef) { $chatInput.value = ''; return; }
+    $chatInput.value = '';
+
+    // /clear — wipes the chat log for this client only; nobody else is affected.
+    if (raw === '/clear') {
+      $chatLog.innerHTML = '';
+      appendChatLine('<span class="chat-system">Chat cleared (only visible to you).</span>');
+      return;
+    }
+
+    // /w username message — private whisper, visible only to sender + target.
+    if (raw.startsWith('/w ')) {
+      const rest = raw.slice(3).trim();
+      const spaceIdx = rest.indexOf(' ');
+      if (spaceIdx <= 0) {
+        appendChatLine('<span class="chat-system">Usage: /w username message</span>');
+        return;
+      }
+      const targetName = rest.slice(0, spaceIdx);
+      const body = rest.slice(spaceIdx + 1).trim();
+      if (!body) {
+        appendChatLine('<span class="chat-system">Usage: /w username message</span>');
+        return;
+      }
+
+      let targetId = null;
+      others.forEach((p, id) => {
+        if (!targetId && (p.username || '').toLowerCase() === targetName.toLowerCase()) targetId = id;
+      });
+
+      if (!targetId) {
+        appendChatLine('<span class="chat-system">No player named "' + escapeHtml(targetName) + '" found.</span>');
+        return;
+      }
+
+      broadcastChannelRef.send({
+        type: 'broadcast',
+        event: 'whisper',
+        payload: {
+          fromId: currentUser.id, fromName: myUsername,
+          toId: targetId, toName: targetName,
+          text: body, color: myColor
+        }
+      });
+
+      appendChatLine(
+        '<span class="chat-whisper">(whisper to ' + escapeHtml(targetName) + ') ' + escapeHtml(body) + '</span>'
+      );
+      showBubbleFor(currentUser.id, '(to ' + targetName + ') ' + body);
+      return;
+    }
+
+    // Unrecognized slash command — warn locally, don't broadcast it as chat.
+    if (raw.startsWith('/')) {
+      appendChatLine('<span class="chat-system">Unknown command. Try /w username message or /clear.</span>');
+      return;
+    }
+
+    // Normal public message
+    broadcastChannelRef.send({
+      type: 'broadcast',
+      event: 'chat',
+      payload: { id: currentUser.id, username: myUsername, text: raw, color: myColor }
+    });
+
+    appendChatLine(
+      '<span class="chat-name" style="color:' + myColor + '">' + escapeHtml(myUsername) + ':</span> ' +
+      '<span class="chat-text">' + escapeHtml(raw) + '</span>'
+    );
+    showBubbleFor(currentUser.id, raw);
+  }
+
+  $chatSendBtn.addEventListener('click', sendChatMessage);
+
+  $chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      sendChatMessage();
+    } else if (e.key === 'Escape') {
+      $chatInput.blur();
+    }
+  });
+
+  // Pressing Enter anywhere else opens/focuses the chat box instead of
+  // controlling the game. Once focused, the input's own handler (above)
+  // takes over and Enter sends instead.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && document.activeElement !== $chatInput) {
+      e.preventDefault();
+      $chatInput.focus();
+    }
+  }, true);
+
+  // ─── Movement input ──────────────────────────────────────────────────────────
   const keys = Object.create(null);
-  window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
-  window.addEventListener('keyup',   (e) => { keys[e.key.toLowerCase()] = false; });
+  window.addEventListener('keydown', (e) => {
+    if (document.activeElement === $chatInput) return; // typing — don't move/jump
+    keys[e.key.toLowerCase()] = true;
+  });
+  window.addEventListener('keyup', (e) => {
+    if (document.activeElement === $chatInput) return;
+    keys[e.key.toLowerCase()] = false;
+  });
+  $chatInput.addEventListener('focus', () => {
+    for (const k in keys) keys[k] = false; // release any held movement keys
+  });
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
   function randomColor(seed) {
@@ -228,7 +435,6 @@
     $gameWrap.style.display  = 'block';
     $status.textContent      = 'Loading your profile…';
 
-    // Fetch own profile
     const { data: profile } = await supabaseClient
       .from('profiles')
       .select('username')
@@ -243,7 +449,6 @@
     myHealth   = MAX_HEALTH;
     myAlive    = true;
 
-    // Initial DB presence row
     await supabaseClient.from('world_players').upsert({
       id:         currentUser.id,
       username:   myUsername,
@@ -253,19 +458,14 @@
       updated_at: new Date().toISOString()
     });
 
-    // Seed other players from DB snapshot (for late joiners)
     const { data: existing } = await supabaseClient.from('world_players').select('*');
     if (existing) {
       existing.forEach((row) => {
         if (row.id === currentUser.id) return;
-        others.set(row.id, { ...row, tx: row.x, ty: row.y, health: MAX_HEALTH, alive: true });
+        others.set(row.id, { ...row, tx: row.x, ty: row.y, health: MAX_HEALTH, alive: true, chatText: '', chatAt: 0 });
       });
     }
 
-    // ── Realtime broadcast channel (no DB round-trip per move) ──────────────
-    // Broadcast carries position at ~20 Hz. This is a pure WebSocket pub/sub
-    // message — it does NOT hit Postgres and has ~5–15ms latency vs 80–300ms
-    // for postgres_changes.
     const broadcastChannel = supabaseClient.channel('world:movement', {
       config: { broadcast: { self: false } }
     });
@@ -278,7 +478,6 @@
 
         const existing = others.get(id);
         if (existing) {
-          // Update target; interpolation will glide render position toward it
           existing.tx = x;
           existing.ty = y;
           existing.username   = username;
@@ -287,13 +486,12 @@
           existing.alive      = alive;
           existing.updated_at = Date.now();
         } else {
-          // First time seeing this player — snap immediately, no lerp jump
           others.set(id, {
             id, username, color,
-            x, y,       // render starts at target
-            tx: x, ty: y,
+            x, y, tx: x, ty: y,
             health, alive,
-            updated_at: Date.now()
+            updated_at: Date.now(),
+            chatText: '', chatAt: 0
           });
         }
       })
@@ -301,14 +499,31 @@
         if (payload.ownerId === currentUser.id) return;
         spawnBullet(payload.ownerId, payload.x, payload.y, payload.angle, payload.color, false);
       })
-      // Also watch DB changes for join/leave events (presence) and late-joiner sync
+      .on('broadcast', { event: 'chat' }, ({ payload }) => {
+        if (payload.id === currentUser.id) return;
+        appendChatLine(
+          '<span class="chat-name" style="color:' + (payload.color || '#6ea8ff') + '">' +
+          escapeHtml(payload.username || 'Anon') + ':</span> ' +
+          '<span class="chat-text">' + escapeHtml(payload.text) + '</span>'
+        );
+        showBubbleFor(payload.id, payload.text);
+      })
+      .on('broadcast', { event: 'whisper' }, ({ payload }) => {
+        // Only the intended recipient renders it — sender already showed their own copy locally.
+        if (payload.toId !== currentUser.id) return;
+        appendChatLine(
+          '<span class="chat-whisper">(whisper from ' + escapeHtml(payload.fromName) + ') ' +
+          escapeHtml(payload.text) + '</span>'
+        );
+        showBubbleFor(payload.fromId, '(whisper) ' + payload.text);
+      })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'world_players' }, ({ old: o }) => {
         others.delete(o.id);
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'world_players' }, ({ new: row }) => {
         if (row.id === currentUser.id) return;
         if (!others.has(row.id)) {
-          others.set(row.id, { ...row, tx: row.x, ty: row.y, health: MAX_HEALTH, alive: true });
+          others.set(row.id, { ...row, tx: row.x, ty: row.y, health: MAX_HEALTH, alive: true, chatText: '', chatAt: 0 });
         }
       })
       .subscribe((status) => {
@@ -317,7 +532,6 @@
         }
       });
 
-    // ── Broadcast loop (high-frequency, no DB) ───────────────────────────────
     let lastBroadcast = { x: null, y: null, health: null, alive: null };
     setInterval(() => {
       if (!currentUser) return;
@@ -339,7 +553,6 @@
       });
     }, Math.floor(1000 / BROADCAST_HZ));
 
-    // ── Slow DB sync (keep presence alive for late joiners) ──────────────────
     setInterval(async () => {
       if (!currentUser) return;
       await supabaseClient.from('world_players').update({
@@ -349,7 +562,6 @@
       }).eq('id', currentUser.id);
     }, DB_SYNC_MS);
 
-    // ── Cleanup on tab close ──────────────────────────────────────────────────
     window.addEventListener('beforeunload', () => {
       broadcastChannel.send({
         type: 'broadcast', event: 'leave',
@@ -364,30 +576,14 @@
   // ─── Game loop ───────────────────────────────────────────────────────────────
   let lastFrame = performance.now();
 
-  function loop(now) {
-    const dt = Math.min((now - lastFrame) / 1000, 0.05);
-    lastFrame = now;
-
-    if (!myAlive) {
-      // Frozen while dead — countdown to respawn
-      if (performance.now() >= respawnAt) {
-        myAlive   = true;
-        myHealth  = MAX_HEALTH;
-        me.x      = 100 + Math.random() * (WORLD_W - 200);
-        me.y      = GROUND_Y - PLAYER_SIZE / 2;
-        me.vy     = 0;
-        onGround  = false;
-        jumpsUsed = 0;
-      }
-    } else {
-      // ── Horizontal input ────────────────────────────────────────────────────
+  function applyPhysics(dt, allowMoveAndJump) {
+    if (allowMoveAndJump) {
       let dx = 0;
       if (keys['a'] || keys['arrowleft'])  dx -= 1;
       if (keys['d'] || keys['arrowright']) dx += 1;
       me.x = me.x + dx * MOVE_SPEED * dt;
       me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x));
 
-      // ── Jump input (edge-triggered — a single press = one jump attempt) ─────
       const jumpKeyDown = keys['w'] || keys['arrowup'] || keys[' '];
       if (jumpKeyDown && !jumpKeyHeld) {
         if (onGround) {
@@ -400,46 +596,62 @@
         }
       }
       jumpKeyHeld = jumpKeyDown;
-
-      // ── Gravity + vertical motion ────────────────────────────────────────────
-      me.vy = Math.min(me.vy + GRAVITY * dt, MAX_FALL_SPEED);
-      const prevBottom = me.y + PLAYER_SIZE / 2;
-      me.y += me.vy * dt;
-
-      // ── Platform collision (only land on solid ground from above) ───────────
-      onGround = false;
-      const half = PLAYER_SIZE / 2;
-      const feetY = me.y + half;
-      const left  = me.x - half * 0.8;   // slightly narrower hitbox for forgiving edges
-      const right = me.x + half * 0.8;
-
-      for (const p of platforms) {
-        const withinX = right > p.x && left < p.x + p.w;
-        if (!withinX) continue;
-        const platTop = p.y;
-        if (me.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
-          me.y = platTop - half;
-          me.vy = 0;
-          onGround = true;
-          jumpsUsed = 0;
-          break;
-        }
-      }
-
-      // World bounds — don't fall through the floor platform, don't fly off top
-      if (me.y - half < 0) { me.y = half; me.vy = Math.max(me.vy, 0); }
-      if (me.y + half > WORLD_H) { me.y = WORLD_H - half; me.vy = 0; onGround = true; jumpsUsed = 0; }
     }
 
-    // ── Interpolate other players toward their broadcast target ───────────────
+    me.vy = Math.min(me.vy + GRAVITY * dt, MAX_FALL_SPEED);
+    const prevBottom = me.y + PLAYER_SIZE / 2;
+    me.y += me.vy * dt;
+
+    onGround = false;
+    const half = PLAYER_SIZE / 2;
+    const feetY = me.y + half;
+    const left  = me.x - half * 0.8;
+    const right = me.x + half * 0.8;
+
+    for (const p of platforms) {
+      const withinX = right > p.x && left < p.x + p.w;
+      if (!withinX) continue;
+      const platTop = p.y;
+      if (me.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
+        me.y = platTop - half;
+        me.vy = 0;
+        onGround = true;
+        jumpsUsed = 0;
+        break;
+      }
+    }
+
+    if (me.y - half < 0) { me.y = half; me.vy = Math.max(me.vy, 0); }
+    if (me.y + half > WORLD_H) { me.y = WORLD_H - half; me.vy = 0; onGround = true; jumpsUsed = 0; }
+  }
+
+  function loop(now) {
+    const dt = Math.min((now - lastFrame) / 1000, 0.05);
+    lastFrame = now;
+
+    const typing = document.activeElement === $chatInput;
+
+    if (!myAlive) {
+      if (performance.now() >= respawnAt) {
+        myAlive   = true;
+        myHealth  = MAX_HEALTH;
+        me.x      = 100 + Math.random() * (WORLD_W - 200);
+        me.y      = GROUND_Y - PLAYER_SIZE / 2;
+        me.vy     = 0;
+        onGround  = false;
+        jumpsUsed = 0;
+      }
+    } else {
+      // Gravity/physics still apply while typing — only move/jump input is blocked.
+      applyPhysics(dt, !typing);
+    }
+
     const nowMs = Date.now();
     others.forEach((p, id) => {
-      // Stale check — if we haven't heard from them in a while, remove
       if (nowMs - p.updated_at > STALE_MS) {
         others.delete(id);
         return;
       }
-      // Lerp render position toward target
       p.x = lerp(p.x, p.tx, LERP_FACTOR);
       p.y = lerp(p.y, p.ty, LERP_FACTOR);
     });
@@ -450,7 +662,6 @@
     requestAnimationFrame(loop);
   }
 
-  // ─── Bullets: simulation, platform blocking, and self-authoritative hit detection ──
   function updateBullets(dt) {
     const nowPerf = performance.now();
     bullets.forEach((b, id) => {
@@ -461,7 +672,6 @@
 
       if (b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) { bullets.delete(id); return; }
 
-      // Blocked by solid platforms
       for (const p of platforms) {
         if (b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h) {
           bullets.delete(id);
@@ -469,8 +679,6 @@
         }
       }
 
-      // Self-authoritative hit check: only I decide if a bullet (that isn't mine)
-      // hit ME, using my own real position — avoids trusting shooter's lag/lerp.
       if (b.ownerId !== currentUser.id && myAlive) {
         const ddx = b.x - me.x, ddy = b.y - me.y;
         if (ddx * ddx + ddy * ddy <= HIT_RADIUS * HIT_RADIUS) {
@@ -496,9 +704,54 @@
     ctx.fillRect(bx, by, w * pct, h);
   }
 
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
+  // Fading speech-bubble textbox above a player's head. Fades over the last
+  // 40% of its CHAT_BUBBLE_MS lifetime, then simply stops being drawn.
+  function drawChatBubble(x, y, text, ageMs) {
+    if (!text || ageMs >= CHAT_BUBBLE_MS) return;
+
+    const fadeStart = CHAT_BUBBLE_MS * 0.6;
+    let alpha = 1;
+    if (ageMs > fadeStart) {
+      alpha = 1 - (ageMs - fadeStart) / (CHAT_BUBBLE_MS - fadeStart);
+    }
+    alpha = Math.max(0, Math.min(1, alpha));
+
+    ctx.font = '12px Arial';
+    const paddingX = 8;
+    const textW = ctx.measureText(text).width;
+    const boxW = Math.min(textW + paddingX * 2, 220);
+    const boxH = 20;
+    const boxX = x - boxW / 2;
+    const boxY = y - PLAYER_SIZE / 2 - 42;
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(20,22,28,0.88)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    roundRect(ctx, boxX, boxY, boxW, boxH, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#e9ebf1';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, boxY + boxH / 2 + 1, boxW - paddingX);
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
+  }
+
   function drawPlayer(x, y, color, label, isMe, health, alive) {
     if (!alive) {
-      // Dead — faded ghost marker only
       ctx.globalAlpha = 0.25;
       ctx.fillStyle = color;
       ctx.beginPath();
@@ -550,7 +803,6 @@
   function draw() {
     ctx.clearRect(0, 0, WORLD_W, WORLD_H);
 
-    // Grid background
     ctx.strokeStyle = 'rgba(255,255,255,0.04)';
     ctx.lineWidth   = 1;
     for (let gx = 0; gx < WORLD_W; gx += 40) {
@@ -560,7 +812,6 @@
       ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
     }
 
-    // Platforms
     platforms.forEach((p) => {
       ctx.fillStyle = '#343947';
       ctx.fillRect(p.x, p.y, p.w, p.h);
@@ -570,16 +821,23 @@
 
     drawBullets();
 
+    const nowPerf = performance.now();
+
     let liveCount = 1;
     others.forEach((p) => {
       liveCount++;
       const alive = p.alive !== false;
       drawPlayer(p.x, p.y, p.color || '#6ea8ff', p.username || 'Anon', false, p.health ?? MAX_HEALTH, alive);
+      if (alive && p.chatText) {
+        drawChatBubble(p.x, p.y, p.chatText, nowPerf - (p.chatAt || 0));
+      }
     });
 
     drawPlayer(me.x, me.y, myColor, myUsername, true, myHealth, myAlive);
+    if (myAlive && myChatBubbleText) {
+      drawChatBubble(me.x, me.y, myChatBubbleText, nowPerf - myChatBubbleAt);
+    }
 
-    // Death overlay
     if (!myAlive) {
       const secsLeft = Math.max(0, (respawnAt - performance.now()) / 1000);
       ctx.fillStyle = 'rgba(10,12,16,0.55)';
