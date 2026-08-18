@@ -50,6 +50,28 @@
     color: var(--muted); font-size: 0.8rem;
     text-shadow: 0 1px 4px rgba(0,0,0,0.8);
   }
+  #leaderboard {
+    position: fixed; top: 12px; right: 12px; z-index: 10;
+    width: 190px;
+    background: rgba(20,22,28,0.72);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+    backdrop-filter: blur(2px);
+    font-size: 0.8rem;
+  }
+  #leaderboard h2 {
+    margin: 0 0 0.35rem; font-size: 0.85rem;
+    color: var(--accent);
+  }
+  #lbList { list-style: none; margin: 0; padding: 0; }
+  #lbList li {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.12rem 0; color: var(--text);
+  }
+  #lbList .lb-rank { color: var(--muted); width: 1.1em; }
+  #lbList .lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lbList .lb-kills { color: var(--accent); font-weight: bold; }
   #gameWrap {
     position: fixed; inset: 0;
     width: 100vw; height: 100vh;
@@ -148,6 +170,11 @@
 <div id="gameWrap" style="display:none;">
   <canvas id="game"></canvas>
 
+  <div id="leaderboard">
+    <h2>🏆 Leaderboard</h2>
+    <ol id="lbList"></ol>
+  </div>
+
   <div id="chatBox">
     <div id="chatLog"></div>
     <div id="chatInputRow">
@@ -183,6 +210,7 @@
   const $chatLog     = document.getElementById('chatLog');
   const $chatInput   = document.getElementById('chatInput');
   const $chatSendBtn = document.getElementById('chatSendBtn');
+  const $lbList       = document.getElementById('lbList');
 
   const WORLD_W       = 2600;      // camera follows the player around the level
   const WORLD_H       = 1500;
@@ -214,11 +242,16 @@
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
-  function updateCamera() {
+  const CAMERA_SMOOTH_SPEED = 6; // higher = snappier, lower = smoother/laggier follow
+
+  function updateCamera(dt) {
     const viewW = canvas.width / ZOOM;
     const viewH = canvas.height / ZOOM;
-    camera.x = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
-    camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
+    const targetX = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
+    const targetY = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
+    const alpha = Math.min(1, CAMERA_SMOOTH_SPEED * dt);
+    camera.x = lerp(camera.x, targetX, alpha);
+    camera.y = lerp(camera.y, targetY, alpha);
   }
 
   // ── Combat ────────────────────────────────────────────────────────────────
@@ -295,6 +328,7 @@
   let lastShotAt  = 0;
   let lastDamageAt = -Infinity; // last time we took damage — gates health regen
   let hitFlashAt   = -Infinity; // last time we took damage — drives the red screen flash
+  let hitLandedAt  = -Infinity; // last time WE landed a hit on someone — drives the blue flash
 
   // Transient hit-effect bursts drawn in world space: a spark ring at the
   // impact point, and (for hits you land on someone else) a floating
@@ -524,6 +558,38 @@
 
   function lerp(a, b, t) { return a + (b - a) * t; }
 
+  // Records a kill or death via a security-definer RPC (see the SQL — it
+  // increments the caller's own row using auth.uid() server-side, so a
+  // client can never credit/blame anyone but itself). Fire-and-forget;
+  // failures here shouldn't interrupt the game.
+  async function bumpStat(rpcName) {
+    if (!currentUser) return;
+    try {
+      await supabaseClient.rpc(rpcName, { p_username: myUsername });
+      refreshLeaderboard();
+    } catch (err) {
+      console.error('bumpStat failed:', err);
+    }
+  }
+
+  async function refreshLeaderboard() {
+    try {
+      const { data, error } = await supabaseClient
+        .from('player_stats')
+        .select('username, kills, deaths')
+        .order('kills', { ascending: false })
+        .limit(8);
+      if (error || !data) return;
+      $lbList.innerHTML = data.map((row, i) => (
+        '<li><span class="lb-rank">' + (i + 1) + '.</span>' +
+        '<span class="lb-name">' + escapeHtml(row.username || 'Anon') + '</span>' +
+        '<span class="lb-kills">' + row.kills + '</span></li>'
+      )).join('');
+    } catch (err) {
+      console.error('refreshLeaderboard failed:', err);
+    }
+  }
+
   // Shortest signed difference from a to b, wrapped to [-PI, PI].
   function angleDiff(a, b) {
     let d = (b - a) % (Math.PI * 2);
@@ -636,6 +702,13 @@
     myHealth   = MAX_HEALTH;
     myAlive    = true;
 
+    {
+      const viewW = canvas.width / ZOOM;
+      const viewH = canvas.height / ZOOM;
+      camera.x = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
+      camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
+    }
+
     await supabaseClient.from('world_players').upsert({
       id:         currentUser.id,
       username:   myUsername,
@@ -708,10 +781,12 @@
         // The victim tells us we landed a hit — we can't detect this
         // ourselves since damage is resolved on their client.
         if (payload.toId !== currentUser.id) return;
+        hitLandedAt = performance.now();
         impacts.push({
           x: payload.x, y: payload.y, color: '#ffd166',
           at: performance.now(), text: '-' + (payload.damage || BULLET_DAMAGE)
         });
+        if (payload.killed) bumpStat('increment_kills');
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'world_players' }, ({ old: o }) => {
         others.delete(o.id);
@@ -786,6 +861,9 @@
     // dodge damage just by switching away; setInterval is only throttled
     // (typically to ~1 tick/sec) but never stops outright.
     setInterval(loop, 16);
+
+    refreshLeaderboard();
+    setInterval(refreshLeaderboard, 6000);
   }
 
   // ─── Game loop ───────────────────────────────────────────────────────────────
@@ -906,6 +984,13 @@
         onGround  = false;
         jumpsUsed = 0;
         lastDamageAt = -Infinity;
+
+        // Snap the camera straight to the new spot instead of smoothly
+        // panning across the whole map after a respawn.
+        const viewW = canvas.width / ZOOM;
+        const viewH = canvas.height / ZOOM;
+        camera.x = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
+        camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
       }
     } else {
       // Gravity/physics still apply while typing — only move/jump input is blocked.
@@ -929,6 +1014,7 @@
     });
 
     updateBullets(dt);
+    updateCamera(dt);
 
     draw();
   }
@@ -958,21 +1044,40 @@
           hitFlashAt    = performance.now();
           impacts.push({ x: b.x, y: b.y, color: '#ff6b6b', at: performance.now() });
 
+          const killed = myHealth <= 0;
+
           // Let the shooter know they connected — they can't detect this
           // hit themselves since it's resolved on the victim's client.
           if (broadcastChannelRef) {
             broadcastChannelRef.send({
               type: 'broadcast',
               event: 'hitConfirm',
-              payload: { toId: b.ownerId, x: b.x, y: b.y, damage: BULLET_DAMAGE }
+              payload: { toId: b.ownerId, x: b.x, y: b.y, damage: BULLET_DAMAGE, killed }
             });
           }
 
-          if (myHealth <= 0) {
+          if (killed) {
             myAlive   = false;
             respawnAt = performance.now() + RESPAWN_MS;
+            bumpStat('increment_deaths');
           }
+          return;
         }
+      }
+
+      // Visual-only: a bullet should vanish the instant it looks like it hit
+      // ANY player, on every client watching — not just on the victim's own
+      // screen (their client is still the one authoritative for the damage,
+      // via the check above / their own copy of this same check).
+      let hitOther = false;
+      others.forEach((p) => {
+        if (hitOther || p.alive === false || p.id === b.ownerId) return;
+        const ddx = b.x - p.x, ddy = b.y - p.y;
+        if (ddx * ddx + ddy * ddy <= HIT_RADIUS * HIT_RADIUS) hitOther = true;
+      });
+      if (hitOther) {
+        bullets.delete(id);
+        impacts.push({ x: b.x, y: b.y, color: '#ff6b6b', at: performance.now() });
       }
     });
   }
@@ -1203,6 +1308,12 @@
       const alpha = 0.55 * (1 - sinceHit / HIT_FLASH_MS);
       drawVignette(`rgba(255,20,20,${alpha.toFixed(3)})`);
     }
+
+    const sinceLanded = nowPerf - hitLandedAt;
+    if (sinceLanded >= 0 && sinceLanded < HIT_FLASH_MS) {
+      const alpha = 0.5 * (1 - sinceLanded / HIT_FLASH_MS);
+      drawVignette(`rgba(70,150,255,${alpha.toFixed(3)})`);
+    }
   }
 
   // Draws an edge arrow pointing toward each alive player who is currently
@@ -1259,7 +1370,6 @@
   }
 
   function draw() {
-    updateCamera();
     const viewW = canvas.width / ZOOM;
     const viewH = canvas.height / ZOOM;
 
