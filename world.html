@@ -188,7 +188,11 @@
   const WORLD_H       = 1500;
   const ZOOM          = 1.8;       // render scale — >1 = zoomed in
   const PLAYER_SIZE   = 24;
-  const MOVE_SPEED    = 220;       // horizontal px per second
+  const BASE_MOVE_SPEED = 260;     // horizontal top speed, px/s — a bit faster than before
+  const MOVE_ACCEL      = 2000;    // px/s^2 — how quickly you get up to top speed
+  const MOVE_FRICTION    = 1700;   // px/s^2 — how quickly you slow down with no input
+  const LOW_HEALTH_THRESHOLD  = 50;  // at or below this health you move slower
+  const LOW_HEALTH_SPEED_MULT = 0.6; // fraction of top speed while low on health
   const GRAVITY       = 1400;      // px per second^2
   const JUMP_VELOCITY = -560;      // px per second (negative = up)
   const DOUBLE_JUMP_VELOCITY = -480;
@@ -226,6 +230,10 @@
   const HIT_RADIUS       = PLAYER_SIZE / 2 + BULLET_RADIUS;
   const RESPAWN_MS       = 2500;
   const SHOOT_COOLDOWN_MS = 220;
+  const REGEN_DELAY_MS   = 4000;  // no damage for this long before health starts regenerating
+  const REGEN_PER_SEC    = 4;     // hp/sec regen rate once it kicks in
+  const HIT_FLASH_MS     = 350;   // red screen flash duration right when you take a hit
+  const IMPACT_DURATION_MS = 500; // how long a hit-impact spark/number lingers
 
   // ── Chat ─────────────────────────────────────────────────────────────────
   const CHAT_BUBBLE_MS = 2500;   // how long a chat bubble stays over a player's head
@@ -276,14 +284,22 @@
   let myUsername  = 'Anon';
 
   let me = { x: WORLD_W / 2, y: GROUND_Y - PLAYER_SIZE / 2, vy: 0 };
+  let moveVel    = 0; // horizontal velocity — accelerates/decelerates rather than snapping
   let onGround   = false;
   let jumpsUsed  = 0;
   let jumpKeyHeld = false;
 
-  let myHealth   = MAX_HEALTH;
-  let myAlive    = true;
-  let respawnAt  = 0;
-  let lastShotAt = 0;
+  let myHealth    = MAX_HEALTH;
+  let myAlive     = true;
+  let respawnAt   = 0;
+  let lastShotAt  = 0;
+  let lastDamageAt = -Infinity; // last time we took damage — gates health regen
+  let hitFlashAt   = -Infinity; // last time we took damage — drives the red screen flash
+
+  // Transient hit-effect bursts drawn in world space: a spark ring at the
+  // impact point, and (for hits you land on someone else) a floating
+  // damage number so you know you connected.
+  const impacts = [];
 
   // ── Aiming ──────────────────────────────────────────────────────────────
   // Aim direction is controlled with I (rotate left/counter-clockwise) and
@@ -688,6 +704,15 @@
         );
         showBubbleFor(payload.fromId, '(whisper) ' + payload.text);
       })
+      .on('broadcast', { event: 'hitConfirm' }, ({ payload }) => {
+        // The victim tells us we landed a hit — we can't detect this
+        // ourselves since damage is resolved on their client.
+        if (payload.toId !== currentUser.id) return;
+        impacts.push({
+          x: payload.x, y: payload.y, color: '#ffd166',
+          at: performance.now(), text: '-' + (payload.damage || BULLET_DAMAGE)
+        });
+      })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'world_players' }, ({ old: o }) => {
         others.delete(o.id);
       })
@@ -768,10 +793,27 @@
 
   function applyPhysics(dt, allowMoveAndJump) {
     if (allowMoveAndJump) {
-      let dx = 0;
-      if (keys['a'] || keys['arrowleft'])  dx -= 1;
-      if (keys['d'] || keys['arrowright']) dx += 1;
-      me.x = me.x + dx * MOVE_SPEED * dt;
+      let dxInput = 0;
+      if (keys['a'] || keys['arrowleft'])  dxInput -= 1;
+      if (keys['d'] || keys['arrowright']) dxInput += 1;
+
+      const topSpeed = myHealth <= LOW_HEALTH_THRESHOLD
+        ? BASE_MOVE_SPEED * LOW_HEALTH_SPEED_MULT
+        : BASE_MOVE_SPEED;
+
+      if (dxInput !== 0) {
+        moveVel += dxInput * MOVE_ACCEL * dt;
+        moveVel = Math.max(-topSpeed, Math.min(topSpeed, moveVel));
+      } else {
+        const friction = MOVE_FRICTION * dt;
+        if (moveVel > 0) moveVel = Math.max(0, moveVel - friction);
+        else if (moveVel < 0) moveVel = Math.min(0, moveVel + friction);
+      }
+      // Also clamp toward the (possibly lower, at low health) top speed even
+      // while already moving faster, so the penalty kicks in immediately.
+      moveVel = Math.max(-topSpeed, Math.min(topSpeed, moveVel));
+
+      me.x = me.x + moveVel * dt;
       me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x));
 
       const jumpKeyDown = keys['w'] || keys['arrowup'] || keys[' '];
@@ -860,12 +902,20 @@
         me.x      = 100 + Math.random() * (WORLD_W - 200);
         me.y      = GROUND_Y - PLAYER_SIZE / 2;
         me.vy     = 0;
+        moveVel   = 0;
         onGround  = false;
         jumpsUsed = 0;
+        lastDamageAt = -Infinity;
       }
     } else {
       // Gravity/physics still apply while typing — only move/jump input is blocked.
       applyPhysics(dt, !typing);
+
+      // Passive regen: once you've gone a while without taking damage,
+      // slowly heal back up.
+      if (myHealth < MAX_HEALTH && (now - lastDamageAt) > REGEN_DELAY_MS) {
+        myHealth = Math.min(MAX_HEALTH, myHealth + REGEN_PER_SEC * dt);
+      }
     }
 
     const nowMs = Date.now();
@@ -894,6 +944,7 @@
       for (const p of platforms) {
         if (b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h) {
           bullets.delete(id);
+          impacts.push({ x: b.x, y: b.y, color: '#9aa1b2', at: performance.now() });
           return;
         }
       }
@@ -902,7 +953,21 @@
         const ddx = b.x - me.x, ddy = b.y - me.y;
         if (ddx * ddx + ddy * ddy <= HIT_RADIUS * HIT_RADIUS) {
           bullets.delete(id);
-          myHealth = Math.max(0, myHealth - BULLET_DAMAGE);
+          myHealth      = Math.max(0, myHealth - BULLET_DAMAGE);
+          lastDamageAt  = performance.now();
+          hitFlashAt    = performance.now();
+          impacts.push({ x: b.x, y: b.y, color: '#ff6b6b', at: performance.now() });
+
+          // Let the shooter know they connected — they can't detect this
+          // hit themselves since it's resolved on the victim's client.
+          if (broadcastChannelRef) {
+            broadcastChannelRef.send({
+              type: 'broadcast',
+              event: 'hitConfirm',
+              payload: { toId: b.ownerId, x: b.x, y: b.y, damage: BULLET_DAMAGE }
+            });
+          }
+
           if (myHealth <= 0) {
             myAlive   = false;
             respawnAt = performance.now() + RESPAWN_MS;
@@ -1079,6 +1144,67 @@
     });
   }
 
+  // Transient hit-effect bursts in world space: an expanding ring at the
+  // impact point, plus (for hits you land) a floating damage number that
+  // drifts up and fades — so both sides of a hit get feedback.
+  function drawImpacts(nowPerf) {
+    for (let i = impacts.length - 1; i >= 0; i--) {
+      const imp = impacts[i];
+      const age = nowPerf - imp.at;
+      if (age > IMPACT_DURATION_MS) { impacts.splice(i, 1); continue; }
+
+      const t = age / IMPACT_DURATION_MS;
+      const alpha = 1 - t;
+      const radius = 4 + t * 16;
+
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = imp.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(imp.x, imp.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      if (imp.text) {
+        ctx.fillStyle = imp.color;
+        ctx.font = 'bold 13px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(imp.text, imp.x, imp.y - 14 - t * 18);
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Colored radial vignette (transparent centre, colored edges) used for
+  // both the low-health pulse and the sharper on-hit flash.
+  function drawVignette(colorStr) {
+    const cx = canvas.width / 2, cy = canvas.height / 2;
+    const g = ctx.createRadialGradient(
+      cx, cy, Math.min(canvas.width, canvas.height) * 0.28,
+      cx, cy, Math.max(canvas.width, canvas.height) * 0.72
+    );
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, colorStr);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Screen-space effects: a slow pulsing red vignette while at or below
+  // half health (a "heartbeat"), plus a sharper, faster flash right when
+  // a hit lands so you know you got tagged.
+  function drawScreenEffects(nowPerf) {
+    if (myAlive && myHealth > 0 && myHealth <= LOW_HEALTH_THRESHOLD) {
+      const pulse = 0.5 + 0.5 * Math.sin(nowPerf / 300); // ~0..1, ~1.9s cycle
+      const alpha = 0.16 + 0.16 * pulse;
+      drawVignette(`rgba(255,40,40,${alpha.toFixed(3)})`);
+    }
+
+    const sinceHit = nowPerf - hitFlashAt;
+    if (sinceHit >= 0 && sinceHit < HIT_FLASH_MS) {
+      const alpha = 0.55 * (1 - sinceHit / HIT_FLASH_MS);
+      drawVignette(`rgba(255,20,20,${alpha.toFixed(3)})`);
+    }
+  }
+
   // Draws an edge arrow pointing toward each alive player who is currently
   // outside the camera's viewport, so they're never just "gone" off-screen
   // in a world this big.
@@ -1164,6 +1290,8 @@
 
     const nowPerf = performance.now();
 
+    drawImpacts(nowPerf);
+
     let liveCount = 1;
     others.forEach((p) => {
       liveCount++;
@@ -1185,6 +1313,7 @@
 
     ctx.restore();
 
+    drawScreenEffects(nowPerf);
     drawOffscreenIndicators(viewW, viewH);
 
     if (!myAlive) {
