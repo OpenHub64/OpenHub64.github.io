@@ -268,6 +268,11 @@
   const BULLET_SPEED     = 760;    // px per second
   const BULLET_GRAVITY    = 420;   // px/s^2 — slight arc on bullets, gentler than player gravity
   const BULLET_RADIUS    = 4;
+  // Client-only, cosmetic: used solely to predict an instant impact spark
+  // for the shooter's own bullets (see updateBullets). The server's own
+  // HIT_RADIUS in physics.js is the real authority on damage — this is
+  // never used to decide anything that matters.
+  const CLIENT_HIT_RADIUS = PLAYER_SIZE / 2 + BULLET_RADIUS;
   const RESPAWN_MS       = 2500; // display-only fallback; real timing comes from server's respawnInMs
   const SHOOT_COOLDOWN_MS = 220;
   const REGEN_DELAY_MS   = 4000;  // no damage for this long before health starts regenerating
@@ -963,11 +968,17 @@
           lastDamageAt = performance.now();
         }
         if (ev.shooterId === currentUser.id) {
+          // Skip the duplicate spark/number if updateBullets already showed
+          // this exact hit as a prediction a moment ago — this is just the
+          // server catching up to confirm something the shooter already saw.
+          const alreadyShown = (performance.now() - hitLandedAt) < 250;
           hitLandedAt = performance.now();
-          impacts.push({
-            x: ev.x, y: ev.y, color: '#ffd166',
-            at: performance.now(), text: '-' + (ev.damage || BULLET_DAMAGE)
-          });
+          if (!alreadyShown) {
+            impacts.push({
+              x: ev.x, y: ev.y, color: '#ffd166',
+              at: performance.now(), text: '-' + (ev.damage || BULLET_DAMAGE)
+            });
+          }
         }
       } else if (ev.kind === 'kill') {
         if (ev.shooterId === currentUser.id || ev.targetId === currentUser.id) refreshLeaderboard();
@@ -1177,19 +1188,54 @@
   // physics for instant feedback the moment they're fired; everything else
   // (server-confirmed bullets, including our own once matched) blends
   // toward the latest authoritative position each snapshot.
+  //
+  // Predicted bullets also get an instant, purely-cosmetic hit check
+  // against `others` (client-only, mirrors the server's HIT_RADIUS check
+  // just for visual timing) — this is what makes the shooter see their
+  // impact spark immediately instead of waiting a full round-trip for the
+  // server's real 'hit' event. Damage/kills are never decided here; if the
+  // server disagrees (rare — target had already moved by the time the shot
+  // actually got there server-side), the spark just isn't followed by a
+  // real hit and nothing else happens.
+  const PREDICTED_BULLET_MAX_STEP = 6; // px — matches the server's tunneling fix
+
   function updateBullets(dt) {
     bullets.forEach((b, id) => {
       if (b.mode === 'predicted') {
-        b.vy += BULLET_GRAVITY * dt;
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
+        const totalDist = Math.hypot(b.vx, b.vy) * dt;
+        const steps = Math.max(1, Math.ceil(totalDist / PREDICTED_BULLET_MAX_STEP));
+        const stepDt = dt / steps;
 
-        if (b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) { bullets.delete(id); return; }
+        for (let s = 0; s < steps; s++) {
+          b.vy += BULLET_GRAVITY * stepDt;
+          b.x += b.vx * stepDt;
+          b.y += b.vy * stepDt;
 
-        for (const p of platforms) {
-          if (b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h) {
+          if (b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) { bullets.delete(id); return; }
+
+          let hitPlatform = false;
+          for (const p of platforms) {
+            if (b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h) { hitPlatform = true; break; }
+          }
+          if (hitPlatform) {
             bullets.delete(id);
             return; // no local impact spark here — the server's own impact event covers it
+          }
+
+          let predictedHit = null;
+          others.forEach((p) => {
+            if (predictedHit || p.alive === false) return;
+            const ddx = b.x - p.x, ddy = b.y - p.y;
+            if (ddx * ddx + ddy * ddy <= CLIENT_HIT_RADIUS * CLIENT_HIT_RADIUS) predictedHit = p;
+          });
+          if (predictedHit) {
+            bullets.delete(id);
+            hitLandedAt = performance.now();
+            impacts.push({
+              x: b.x, y: b.y, color: '#ffd166',
+              at: performance.now(), text: '-' + BULLET_DAMAGE
+            });
+            return;
           }
         }
       } else {
