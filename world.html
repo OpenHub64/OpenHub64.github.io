@@ -957,9 +957,19 @@
     });
     bullets.forEach((b, id) => {
       if (seenBulletIds.has(id)) return;
-      // Grace period so a just-fired predicted bullet doesn't get pruned
-      // before the very first snapshot that would confirm it.
-      if (b.mode === 'predicted' && performance.now() - b.createdAt < 150) return;
+      // Predicted bullets manage their own lifecycle locally (bounds/
+      // platform/hit checks run every frame in updateBullets) — they don't
+      // need to appear in a snapshot to be legitimately still alive. A
+      // fast/laggy round-trip can easily take longer than one tick, and
+      // pruning on a short timer here was deleting the prediction before
+      // its real server-side match ever showed up — so when the real one
+      // finally arrived, there was nothing left to match it against, and a
+      // brand-new bullet got created from scratch. Looked exactly like a
+      // second shot. Only a generous safety-net timeout remains, purely to
+      // avoid a permanent leak in a truly pathological case (e.g. it
+      // resolved same-tick server-side and will just never appear in any
+      // snapshot at all).
+      if (b.mode === 'predicted' && performance.now() - b.createdAt < 3000) return;
       bullets.delete(id);
     });
 
