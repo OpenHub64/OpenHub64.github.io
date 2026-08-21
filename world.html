@@ -1,1 +1,1630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenHub World</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #1b1d23;
+    --panel: #22252d;
+    --border: #343947;
+    --text: #e9ebf1;
+    --muted: #9aa1b2;
+    --accent: #6ee7c8;
+    --accent-dark: #2f9c81;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: Arial, sans-serif;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    width: 100vw; height: 100vh;
+    position: relative;
+  }
+  header {
+    position: fixed; top: 12px; left: 12px; right: 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    z-index: 10;
+    pointer-events: none;
+  }
+  header h1 {
+    font-size: 1.1rem; margin: 0;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
+  a.home-btn {
+    pointer-events: auto;
+    text-decoration: none; color: var(--accent);
+    background: rgba(20,22,28,0.6);
+    border: 1px solid var(--accent-dark); border-radius: 999px;
+    padding: 0.35rem 0.9rem; font-size: 0.85rem;
+  }
+  #status {
+    position: fixed; top: 46px; left: 12px; z-index: 10;
+    color: var(--muted); font-size: 0.8rem;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
+  #leaderboard {
+    position: fixed; top: 12px; right: 12px; z-index: 10;
+    width: 190px;
+    background: rgba(20,22,28,0.72);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+    backdrop-filter: blur(2px);
+    font-size: 0.8rem;
+  }
+  #leaderboard h2 {
+    margin: 0 0 0.35rem; font-size: 0.85rem;
+    color: var(--accent);
+  }
+  #lbList { list-style: none; margin: 0; padding: 0; }
+  #lbList li {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.12rem 0; color: var(--text);
+  }
+  #lbList .lb-rank { color: var(--muted); width: 1.1em; }
+  #lbList .lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lbList .lb-kills { color: var(--accent); font-weight: bold; }
+  #gameWrap {
+    position: fixed; inset: 0;
+    width: 100vw; height: 100vh;
+  }
+  canvas {
+    display: block; width: 100vw; height: 100vh;
+    background: #10131a;
+    touch-action: none;
+    cursor: crosshair;
+  }
 
+  /* ── Chat box: bottom-left overlay on the game canvas ─────────────────── */
+  #chatBox {
+    position: fixed;
+    left: 12px;
+    bottom: 44px;
+    width: min(320px, 90vw);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    background: rgba(20,22,28,0.72);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    backdrop-filter: blur(2px);
+    font-size: 0.8rem;
+  }
+  #chatLog {
+    max-height: 140px;
+    overflow-y: auto;
+    padding: 0.5rem 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    scrollbar-width: thin;
+  }
+  .chat-line { line-height: 1.35; word-break: break-word; }
+  .chat-name { font-weight: bold; }
+  .chat-text { color: var(--text); }
+  .chat-system { color: var(--muted); font-style: italic; }
+  .chat-whisper { color: #c792ea; font-style: italic; }
+  #chatInputRow {
+    display: flex;
+    border-top: 1px solid var(--border);
+  }
+  #chatInput {
+    flex: 1;
+    background: rgba(0,0,0,0.25);
+    border: none;
+    color: var(--text);
+    padding: 0.45rem 0.6rem;
+    font-size: 0.8rem;
+    font-family: inherit;
+    outline: none;
+  }
+  #chatInput::placeholder { color: var(--muted); }
+  #chatSendBtn {
+    background: var(--accent);
+    color: #10221c;
+    border: none;
+    font-weight: bold;
+    font-size: 0.8rem;
+    padding: 0 0.8rem;
+    cursor: pointer;
+  }
+  #chatSendBtn:hover { background: #85f0d4; }
+
+  #loginGate {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 20;
+    max-width: 400px; width: 90vw;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.5rem; text-align: center;
+  }
+  #loginGate p { color: var(--muted); line-height: 1.5; }
+  #loginGate a { color: var(--accent); }
+  .hint {
+    position: fixed; bottom: 8px; left: 12px; right: 12px;
+    z-index: 10;
+    margin: 0; color: var(--muted); font-size: 0.78rem; text-align: center;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
+  #playerCount { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="index.html" class="home-btn">⌂ Home</a>
+  <h1>🕹️ OpenHub World</h1>
+  <span style="width:60px"></span>
+</header>
+
+<div id="status">Connecting…</div>
+
+<div id="gameWrap" style="display:none;">
+  <canvas id="game"></canvas>
+
+  <div id="leaderboard">
+    <h2>🏆 Leaderboard</h2>
+    <ol id="lbList"></ol>
+  </div>
+
+  <div id="chatBox">
+    <div id="chatLog"></div>
+    <div id="chatInputRow">
+      <input id="chatInput" type="text" maxlength="200" placeholder="Press Enter to chat… (/w user msg, /clear)">
+      <button id="chatSendBtn" type="button">Send</button>
+    </div>
+  </div>
+</div>
+
+<div id="loginGate">
+  <p>You need to be signed in to enter the world.</p>
+  <p><a href="index.html">Sign in on OpenHub</a>, then come back here.</p>
+</div>
+
+<p class="hint"><strong>A/D</strong> or <strong>←/→</strong> to move, <strong>W / ↑ / Space</strong> to jump (double jump in mid-air), <strong>I/P</strong> to aim, <strong>O</strong> or <strong>click</strong> to shoot, <strong>Enter</strong> to chat. Players online: <span id="playerCount">0</span></p>
+
+
+<script>
+(function () {
+  "use strict";
+
+  const SUPABASE_URL      = 'https://paifmufeevsdgvepewex.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
+  const supabaseClient    = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // ⚠️ Same Railway domain as client-snippet.js / test-combat.js:
+  const SERVER_URL = 'wss://openhub-server-production.up.railway.app';
+
+  // Reconciliation: client-side prediction runs locally every frame for
+  // instant feel, then gets nudged toward the server's authoritative
+  // position each time a 'state' snapshot arrives. Small drift is
+  // corrected gently (imperceptible); large drift (e.g. a missed platform
+  // collision edge case) is snapped instantly rather than visibly sliding.
+  const BULLET_LERP_FACTOR  = 0.35; // bullets are fast — snappier than player lerp
+
+  const $status      = document.getElementById('status');
+  const $gameWrap    = document.getElementById('gameWrap');
+  const $loginGate   = document.getElementById('loginGate');
+  const $playerCount = document.getElementById('playerCount');
+  const canvas       = document.getElementById('game');
+  const ctx          = canvas.getContext('2d');
+
+  const $chatLog     = document.getElementById('chatLog');
+  const $chatInput   = document.getElementById('chatInput');
+  const $chatSendBtn = document.getElementById('chatSendBtn');
+  const $lbList       = document.getElementById('lbList');
+
+  const WORLD_W       = 2600;      // camera follows the player around the level
+  const WORLD_H       = 1500;
+  const ZOOM          = 1.8;       // render scale — >1 = zoomed in
+  const PLAYER_SIZE   = 24;
+  const BASE_MOVE_SPEED = 260;     // horizontal top speed, px/s — a bit faster than before
+  const MOVE_ACCEL      = 2000;    // px/s^2 — how quickly you get up to top speed
+  const MOVE_FRICTION    = 1700;   // px/s^2 — how quickly you slow down with no input
+  const LOW_HEALTH_THRESHOLD  = 50;  // at or below this health you move slower
+  const LOW_HEALTH_SPEED_MULT = 0.6; // fraction of top speed while low on health
+  const GRAVITY       = 1400;      // px per second^2
+  const JUMP_VELOCITY = -560;      // px per second (negative = up)
+  const DOUBLE_JUMP_VELOCITY = -480;
+  const MAX_FALL_SPEED = 900;
+  const BROADCAST_HZ  = 20;        // broadcast ticks per second (50ms) — pure pub/sub, zero DB writes during movement
+  const LERP_FACTOR   = 0.18;      // interpolation per frame for other players — tune 0.10 (smoother) – 0.25 (snappier)
+
+  // Camera follows the local player around the (much bigger) world. Position
+  // is the world coordinate of the viewport's top-left corner, clamped so it
+  // never shows past the world edges.
+  const camera = { x: 0, y: 0 };
+
+  function resizeCanvas() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  const CAMERA_SMOOTH_SPEED = 6; // higher = snappier, lower = smoother/laggier follow
+
+  function updateCamera(dt) {
+    const viewW = canvas.width / ZOOM;
+    const viewH = canvas.height / ZOOM;
+    const targetX = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
+    const targetY = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
+    const alpha = Math.min(1, CAMERA_SMOOTH_SPEED * dt);
+    camera.x = lerp(camera.x, targetX, alpha);
+    camera.y = lerp(camera.y, targetY, alpha);
+  }
+
+  // ── Combat ────────────────────────────────────────────────────────────────
+  const MAX_HEALTH      = 100;
+  const BULLET_DAMAGE    = 18;
+  const BULLET_SPEED     = 760;    // px per second
+  const BULLET_GRAVITY    = 420;   // px/s^2 — slight arc on bullets, gentler than player gravity
+  const BULLET_RADIUS    = 4;
+  // Client-only, cosmetic: used solely to predict an instant impact spark
+  // for the shooter's own bullets (see updateBullets). The server's own
+  // HIT_RADIUS in physics.js is the real authority on damage — this is
+  // never used to decide anything that matters.
+  const CLIENT_HIT_RADIUS = PLAYER_SIZE / 2 + BULLET_RADIUS;
+  const RESPAWN_MS       = 2500; // display-only fallback; real timing comes from server's respawnInMs
+  const SHOOT_COOLDOWN_MS = 220;
+  const REGEN_DELAY_MS   = 4000;  // no damage for this long before health starts regenerating
+  const REGEN_PER_SEC    = 4;     // hp/sec regen rate once it kicks in
+  const HIT_FLASH_MS     = 350;   // red screen flash duration right when you take a hit
+  const IMPACT_DURATION_MS = 500; // how long a hit-impact spark/number lingers
+
+  // ── Chat ─────────────────────────────────────────────────────────────────
+  const CHAT_BUBBLE_MS = 2500;   // how long a chat bubble stays over a player's head
+  const CHAT_LOG_MAX   = 200;    // cap local chat log length
+
+  // ── Platforms (solid ground the player can stand on / land on) ─────────────
+  // Built deterministically (never Math.random) so every client's collision
+  // geometry is identical. A full-width ground, a staggered chain of hops
+  // running the length of the world, and a few climbable towers along the way.
+  const GROUND_Y = WORLD_H - 40;
+  const platforms = [
+    { x: 0, y: GROUND_Y, w: WORLD_W, h: 40 }
+  ];
+
+  const SECTION_W = 260;
+  const hopHeights = [
+    GROUND_Y - 140, GROUND_Y - 260, GROUND_Y - 380,
+    GROUND_Y - 200, GROUND_Y - 320, GROUND_Y - 460
+  ];
+  for (let i = 1; i * SECTION_W < WORLD_W; i++) {
+    const baseX = i * SECTION_W + (i % 2 === 0 ? 30 : -30);
+    const h = hopHeights[i % hopHeights.length];
+    const w = 110 + (i % 4) * 25;
+    platforms.push({ x: baseX, y: h, w, h: 18 });
+  }
+
+  const TOWER_SPACING = 700;
+  for (let i = 0; i * TOWER_SPACING < WORLD_W; i++) {
+    const towerX = 350 + i * TOWER_SPACING;
+    platforms.push({ x: towerX,       y: GROUND_Y - 520, w: 120, h: 18 });
+    platforms.push({ x: towerX + 170, y: GROUND_Y - 680, w: 120, h: 18 });
+    platforms.push({ x: towerX - 170, y: GROUND_Y - 840, w: 120, h: 18 });
+    platforms.push({ x: towerX,       y: GROUND_Y - 1000, w: 120, h: 18 });
+  }
+
+  // Extra scattered mid-height layer offset from the hop chain so there's
+  // always a nearby ledge to duck behind or jump to, not just the two chains above.
+  const SCATTER_SPACING = 340;
+  const scatterHeights = [GROUND_Y - 100, GROUND_Y - 300, GROUND_Y - 560, GROUND_Y - 900];
+  for (let i = 0; i * SCATTER_SPACING < WORLD_W; i++) {
+    const sx = 150 + i * SCATTER_SPACING + (i % 3) * 60;
+    const sy = scatterHeights[i % scatterHeights.length];
+    platforms.push({ x: sx, y: sy, w: 90 + (i % 3) * 20, h: 18 });
+  }
+
+  let currentUser = null;
+  let myColor     = '#6ee7c8';
+  let myUsername  = 'Anon';
+
+  let me = { x: WORLD_W / 2, y: GROUND_Y - PLAYER_SIZE / 2, vy: 0 };
+  let moveVel    = 0; // horizontal velocity — accelerates/decelerates rather than snapping
+  let onGround   = false;
+  let jumpsUsed  = 0;
+  let jumpKeyHeld = false;
+
+  let myHealth    = MAX_HEALTH;
+  let myAlive     = true;
+  let respawnAt   = 0;
+  let lastShotAt  = 0;
+  let lastDamageAt = -Infinity; // last time we took damage — gates health regen
+  let hitFlashAt   = -Infinity; // last time we took damage — drives the red screen flash
+  let hitLandedAt  = -Infinity; // last time WE landed a hit on someone — drives the blue flash
+
+  // Transient hit-effect bursts drawn in world space: a spark ring at the
+  // impact point, and (for hits you land on someone else) a floating
+  // damage number so you know you connected.
+  const impacts = [];
+
+  // ── Aiming ──────────────────────────────────────────────────────────────
+  // Aim direction is controlled with I (rotate left/counter-clockwise) and
+  // P (rotate right/clockwise) instead of the mouse. 0 = facing right.
+  // Rotation is direct/instant from input — no inertia or coasting — so it
+  // always responds immediately to I/P.
+  let aimAngle = 0;
+  const AIM_ROTATE_SPEED  = 3.2; // radians per second
+
+  // ── Aim assist ──────────────────────────────────────────────────────────
+  // Two mechanics, both only active when aim is already close to an alive
+  // nearby player:
+  //  1. Slowdown — friction that reduces turn speed near a target, so it
+  //     takes more deliberate input to swing past them.
+  //  2. Rotational tracking — a gentle continuous pull of the crosshair
+  //     toward the target's current angle, independent of I/P input, so
+  //     it keeps following them as they move instead of only reacting
+  //     when you turn.
+  const AIM_ASSIST_RANGE       = 420;  // only assists toward players within this distance
+  const AIM_ASSIST_TOLERANCE   = 0.32; // radians — how close the aim has to be to kick in
+  const AIM_ASSIST_SLOWDOWN    = 0.6;  // fraction turn speed is reduced by at dead-on
+  const AIM_ASSIST_TRACK_SPEED = 1.6;  // radians/sec the crosshair tracks the target at dead-on
+
+  // Chat bubble over my own head
+  let myChatBubbleText = '';
+  let myChatBubbleAt   = 0;
+
+  const bullets = new Map();
+  let bulletSeq = 0;
+
+  // id → { username, color, x, y, tx, ty, updated_at, health, alive, chatText, chatAt }
+  const others = new Map();
+
+  let broadcastChannelRef = null;
+
+  // Shooting is now server-authoritative: we tell the server "I shot" and
+  // it decides what actually happens (rate limit, bullet spawn, hits).
+  // We still spawn a local *predicted* bullet immediately so firing feels
+  // instant — it gets reconciled against the server's own bullet for this
+  // shot the moment the next 'state' snapshot arrives (usually <=50ms
+  // later), and quietly swapped over to server-driven tracking.
+  function tryShoot() {
+    if (!currentUser || !myAlive) return;
+    if (document.activeElement === $chatInput) return; // don't shoot while typing
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const now = performance.now();
+    if (now - lastShotAt < SHOOT_COOLDOWN_MS) return;
+    lastShotAt = now;
+
+    ws.send(JSON.stringify({ type: 'shoot' }));
+    // Spawn from `sim` (our raw physics position), not `me` (the smoothed
+    // render position) — the server spawns its own copy of this bullet
+    // from ITS physics position, which lines up with `sim`, not with the
+    // render-interpolated point `me` sits at between ticks. Firing from
+    // `me` made the local bullet travel a path parallel to but offset from
+    // the server's real one, so the visual snap when they reconciled
+    // looked like a second bullet appearing.
+    spawnPredictedBullet(sim.x, sim.y, aimAngle);
+  }
+
+  canvas.addEventListener('mousedown', tryShoot);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'o') {
+      if (document.activeElement === $chatInput) return;
+      e.preventDefault();
+      tryShoot();
+    }
+  });
+
+  function spawnPredictedBullet(x, y, angle) {
+    const id = 'predicted:' + (bulletSeq++) + ':' + Date.now();
+    bullets.set(id, {
+      ownerId: currentUser.id, color: myColor,
+      x, y, tx: x, ty: y,
+      vx: Math.cos(angle) * BULLET_SPEED,
+      vy: Math.sin(angle) * BULLET_SPEED,
+      mode: 'predicted',
+      createdAt: performance.now()
+    });
+  }
+
+  // ─── Chat helpers ────────────────────────────────────────────────────────────
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function appendChatLine(html) {
+    const line = document.createElement('div');
+    line.className = 'chat-line';
+    line.innerHTML = html;
+    $chatLog.appendChild(line);
+    while ($chatLog.children.length > CHAT_LOG_MAX) {
+      $chatLog.removeChild($chatLog.firstChild);
+    }
+    $chatLog.scrollTop = $chatLog.scrollHeight;
+  }
+
+  function showBubbleFor(id, text) {
+    if (currentUser && id === currentUser.id) {
+      myChatBubbleText = text;
+      myChatBubbleAt = performance.now();
+      return;
+    }
+    const p = others.get(id);
+    if (p) {
+      p.chatText = text;
+      p.chatAt = performance.now();
+    }
+  }
+
+  function sendChatMessage() {
+    const raw = $chatInput.value.trim();
+    if (!raw || !currentUser || !broadcastChannelRef) { $chatInput.value = ''; return; }
+    $chatInput.value = '';
+
+    // /clear — wipes the chat log for this client only; nobody else is affected.
+    if (raw === '/clear') {
+      $chatLog.innerHTML = '';
+      appendChatLine('<span class="chat-system">Chat cleared (only visible to you).</span>');
+      return;
+    }
+
+    // /w username message — private whisper, visible only to sender + target.
+    if (raw.startsWith('/w ')) {
+      const rest = raw.slice(3).trim();
+      const spaceIdx = rest.indexOf(' ');
+      if (spaceIdx <= 0) {
+        appendChatLine('<span class="chat-system">Usage: /w username message</span>');
+        return;
+      }
+      const targetName = rest.slice(0, spaceIdx);
+      const body = rest.slice(spaceIdx + 1).trim();
+      if (!body) {
+        appendChatLine('<span class="chat-system">Usage: /w username message</span>');
+        return;
+      }
+
+      let targetId = null;
+      others.forEach((p, id) => {
+        if (!targetId && (p.username || '').toLowerCase() === targetName.toLowerCase()) targetId = id;
+      });
+
+      if (!targetId) {
+        appendChatLine('<span class="chat-system">No player named "' + escapeHtml(targetName) + '" found.</span>');
+        return;
+      }
+
+      broadcastChannelRef.send({
+        type: 'broadcast',
+        event: 'whisper',
+        payload: {
+          fromId: currentUser.id, fromName: myUsername,
+          toId: targetId, toName: targetName,
+          text: body, color: myColor
+        }
+      });
+
+      appendChatLine(
+        '<span class="chat-whisper">(whisper to ' + escapeHtml(targetName) + ') ' + escapeHtml(body) + '</span>'
+      );
+      showBubbleFor(currentUser.id, '(to ' + targetName + ') ' + body);
+      return;
+    }
+
+    // Unrecognized slash command — warn locally, don't broadcast it as chat.
+    if (raw.startsWith('/')) {
+      appendChatLine('<span class="chat-system">Unknown command. Try /w username message or /clear.</span>');
+      return;
+    }
+
+    // Normal public message
+    broadcastChannelRef.send({
+      type: 'broadcast',
+      event: 'chat',
+      payload: { id: currentUser.id, username: myUsername, text: raw, color: myColor }
+    });
+
+    appendChatLine(
+      '<span class="chat-name" style="color:' + myColor + '">' + escapeHtml(myUsername) + ':</span> ' +
+      '<span class="chat-text">' + escapeHtml(raw) + '</span>'
+    );
+    showBubbleFor(currentUser.id, raw);
+  }
+
+  $chatSendBtn.addEventListener('click', sendChatMessage);
+
+  $chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      sendChatMessage();
+    } else if (e.key === 'Escape') {
+      $chatInput.blur();
+    }
+  });
+
+  // Pressing Enter anywhere else opens/focuses the chat box instead of
+  // controlling the game. Once focused, the input's own handler (above)
+  // takes over and Enter sends instead.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && document.activeElement !== $chatInput) {
+      e.preventDefault();
+      $chatInput.focus();
+    }
+  }, true);
+
+  // ─── Movement input ──────────────────────────────────────────────────────────
+  const keys = Object.create(null);
+  window.addEventListener('keydown', (e) => {
+    if (document.activeElement === $chatInput) return; // typing — don't move/jump
+    keys[e.key.toLowerCase()] = true;
+  });
+  window.addEventListener('keyup', (e) => {
+    if (document.activeElement === $chatInput) return;
+    keys[e.key.toLowerCase()] = false;
+  });
+  $chatInput.addEventListener('focus', () => {
+    for (const k in keys) keys[k] = false; // release any held movement keys
+  });
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
+  function randomColor(seed) {
+    const colors = ['#6ee7c8','#ff6b6b','#ffd166','#6ea8ff','#c792ea','#ff9f6e','#7ee787'];
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+    return colors[h % colors.length];
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  // Kills/deaths are now recorded server-side (index.js calls
+  // server_increment_kills/server_increment_deaths itself) — the client
+  // just re-reads the leaderboard whenever an event says it might have moved.
+  async function refreshLeaderboard() {
+    try {
+      const { data, error } = await supabaseClient
+        .from('player_stats')
+        .select('username, kills, deaths')
+        .order('kills', { ascending: false })
+        .limit(8);
+      if (error || !data) return;
+      $lbList.innerHTML = data.map((row, i) => (
+        '<li><span class="lb-rank">' + (i + 1) + '.</span>' +
+        '<span class="lb-name">' + escapeHtml(row.username || 'Anon') + '</span>' +
+        '<span class="lb-kills">' + row.kills + '</span></li>'
+      )).join('');
+    } catch (err) {
+      console.error('refreshLeaderboard failed:', err);
+    }
+  }
+
+  // Shortest signed difference from a to b, wrapped to [-PI, PI].
+  function angleDiff(a, b) {
+    let d = (b - a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  // Solves for the launch angle (screen coords, +y = down) that lands a
+  // gravity-affected shot on a target offset by (dx, dy), given bullet
+  // speed and gravity. There are always two solutions for a reachable
+  // target — a direct low path and a lofted "into the sky" path that
+  // arcs up and over before landing on the same point — this picks the
+  // one with the shorter flight time, i.e. the direct path, not just the
+  // smaller angle (which doesn't reliably pick the direct one for every
+  // sign of dx). Falls back to the plain straight-line angle if the
+  // target is out of range for the current speed/gravity (no real solution).
+  function solveLaunchAngle(dx, dy, speed, gravity) {
+    if (Math.abs(dx) < 1) {
+      return Math.atan2(dy, dx || 0.001);
+    }
+    const v2 = speed * speed;
+    const A = (gravity * dx * dx) / (2 * v2);
+    const B = dx;
+    const C = A - dy;
+    if (Math.abs(A) < 1e-9) return Math.atan2(dy, dx);
+
+    const disc = B * B - 4 * A * C;
+    if (disc < 0) return Math.atan2(dy, dx); // unreachable — best-effort fallback
+
+    const sqrtDisc = Math.sqrt(disc);
+    const t1 = (-B + sqrtDisc) / (2 * A);
+    const t2 = (-B - sqrtDisc) / (2 * A);
+
+    // tan(theta) = T has two angle solutions 180deg apart; pick whichever
+    // has cos(theta) matching the sign of dx (so the shot actually travels
+    // toward the target instead of away from it).
+    function angleFromTan(T) {
+      let theta = Math.atan(T);
+      if (dx < 0) theta += Math.PI;
+      if (theta > Math.PI) theta -= Math.PI * 2;
+      if (theta < -Math.PI) theta += Math.PI * 2;
+      return theta;
+    }
+
+    const theta1 = angleFromTan(t1);
+    const theta2 = angleFromTan(t2);
+
+    // Time to cross the horizontal gap dx at this angle: t = dx / (speed*cos(theta)).
+    // The direct path always arrives sooner than the lofted one — use that
+    // instead of angle magnitude, which picks the wrong branch for some dx signs.
+    function flightTime(theta) {
+      const vx = speed * Math.cos(theta);
+      if (Math.abs(vx) < 1e-6) return Infinity;
+      const t = dx / vx;
+      return t > 0 ? t : Infinity;
+    }
+
+    const time1 = flightTime(theta1);
+    const time2 = flightTime(theta2);
+    if (!isFinite(time1) && !isFinite(time2)) return Math.atan2(dy, dx);
+    return time1 <= time2 ? theta1 : theta2;
+  }
+
+  // Finds the nearest alive player whose gravity-compensated firing angle is
+  // within AIM_ASSIST_TOLERANCE of the current aim angle. Returns null if none.
+  function findAimAssistTarget() {
+    let best = null;
+    let bestDiff = AIM_ASSIST_TOLERANCE;
+    others.forEach((p) => {
+      if (p.alive === false) return;
+      const ddx = p.x - me.x, ddy = p.y - me.y;
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (dist > AIM_ASSIST_RANGE) return;
+      const targetAngle = solveLaunchAngle(ddx, ddy, BULLET_SPEED, BULLET_GRAVITY);
+      const diff = Math.abs(angleDiff(aimAngle, targetAngle));
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = { angle: targetAngle, diff };
+      }
+    });
+    return best;
+  }
+
+  // ─── Initialisation ──────────────────────────────────────────────────────────
+  async function init() {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) {
+      $status.textContent = 'Not signed in.';
+      $loginGate.style.display = 'block';
+      return;
+    }
+
+    currentUser = session.user;
+    $loginGate.style.display = 'none';
+    $gameWrap.style.display  = 'block';
+    $status.textContent      = 'Loading your profile…';
+
+    const { data: profile } = await supabaseClient
+      .from('profiles')
+      .select('username')
+      .eq('id', currentUser.id)
+      .single();
+
+    myUsername = (profile && profile.username) ? profile.username : 'Anon';
+    myColor    = randomColor(currentUser.id);
+    me.x       = 100 + Math.random() * (WORLD_W - 200);
+    me.y       = GROUND_Y - PLAYER_SIZE / 2;
+    me.vy      = 0;
+    myHealth   = MAX_HEALTH;
+    myAlive    = true;
+
+    // sim was seeded from `me`'s stale module-load default before this ran —
+    // resync it to the real spawn point, and clear any prediction/replay
+    // state left over from before init (there shouldn't be any yet, but a
+    // future re-init on account switch would otherwise carry stale inputs).
+    sim.x = me.x; sim.y = me.y; sim.vy = me.vy;
+    prevSimX = sim.x; prevSimY = sim.y;
+    fixedAccumulator = 0;
+    pendingInputs.length = 0;
+    inputSeq = 0;
+
+    {
+      const viewW = canvas.width / ZOOM;
+      const viewH = canvas.height / ZOOM;
+      camera.x = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
+      camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
+    }
+
+    // Chat/whisper still ride Supabase Realtime broadcast — the game
+    // server doesn't touch chat at all, so this is unchanged in spirit
+    // from before, just split off from the old movement channel.
+    const chatChannel = supabaseClient.channel('world:chat', {
+      config: { broadcast: { self: false } }
+    });
+    broadcastChannelRef = chatChannel;
+
+    chatChannel
+      .on('broadcast', { event: 'chat' }, ({ payload }) => {
+        if (payload.id === currentUser.id) return;
+        appendChatLine(
+          '<span class="chat-name" style="color:' + (payload.color || '#6ea8ff') + '">' +
+          escapeHtml(payload.username || 'Anon') + ':</span> ' +
+          '<span class="chat-text">' + escapeHtml(payload.text) + '</span>'
+        );
+        showBubbleFor(payload.id, payload.text);
+      })
+      .on('broadcast', { event: 'whisper' }, ({ payload }) => {
+        // Only the intended recipient renders it — sender already showed their own copy locally.
+        if (payload.toId !== currentUser.id) return;
+        appendChatLine(
+          '<span class="chat-whisper">(whisper from ' + escapeHtml(payload.fromName) + ') ' +
+          escapeHtml(payload.text) + '</span>'
+        );
+        showBubbleFor(payload.fromId, '(whisper) ' + payload.text);
+      })
+      .subscribe();
+
+    connectServer();
+
+    window.addEventListener('beforeunload', () => {
+      if (ws) ws.close();
+    });
+
+    // setInterval (not requestAnimationFrame) so local prediction — physics,
+    // camera, bullet interpolation — keeps running even when this tab is in
+    // the background. The real simulation (hits, damage, death) now lives
+    // entirely on the server regardless of tab visibility, so this is just
+    // for smooth rendering + prediction, not correctness.
+    setInterval(loop, 16);
+
+    refreshLeaderboard();
+    setInterval(refreshLeaderboard, 6000);
+  }
+
+  // ─── Server connection ───────────────────────────────────────────────────────
+  let ws = null;
+  let wsReconnectDelay = 1000;
+
+  async function connectServer() {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) return;
+
+    $status.textContent = 'Connecting to world server…';
+    ws = new WebSocket(SERVER_URL);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'auth', token: session.access_token }));
+    };
+
+    ws.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      handleServerMessage(msg);
+    };
+
+    ws.onclose = () => {
+      $status.textContent = 'Disconnected — reconnecting…';
+      others.clear();
+      bullets.clear();
+      // Inputs queued before the gap don't correspond to anything the new
+      // connection's server-side player will recognize — drop them so the
+      // next reconciliation replays only fresh, post-reconnect inputs.
+      pendingInputs.length = 0;
+      setTimeout(() => {
+        wsReconnectDelay = Math.min(wsReconnectDelay * 1.5, 8000);
+        connectServer();
+      }, wsReconnectDelay);
+    };
+
+    ws.onerror = () => { /* onclose fires right after and handles it */ };
+  }
+
+  function handleServerMessage(msg) {
+    if (msg.type === 'authOk') {
+      wsReconnectDelay = 1000;
+      myUsername = msg.username || myUsername;
+      $status.textContent = `Connected. You are ${myUsername}.`;
+      return;
+    }
+    if (msg.type === 'authError') {
+      $status.textContent = 'Auth failed: ' + msg.message;
+      return;
+    }
+    if (msg.type === 'state') {
+      applyServerState(msg);
+      return;
+    }
+    // 'playerCount' is redundant with what draw() derives from `others` — ignored.
+  }
+
+  // Reconciles local prediction against one authoritative 'state' snapshot:
+  // our own position/health/alive, every other player's position, and the
+  // full bullet set — plus this tick's hit/kill/impact events for effects.
+  // Below this, any client/server disagreement is invisible anyway (sub-
+  // pixel jitter from floating point, or the kind of 1-tick lag that
+  // resolves itself next tick) — reconciling it just introduces its own
+  // micro-corrections for no visible benefit. Above it, drift has become
+  // visible — most commonly as "floating" (you're predicting solid ground
+  // under you that the server doesn't agree exists, so you're standing on
+  // nothing as far as it's concerned) — and is worth actually fixing.
+  const FLOAT_DRIFT_THRESHOLD = 40; // px
+
+  function applyServerState(msg) {
+    // ── Self: only correct position when drift is big enough to actually
+    // look wrong (see FLOAT_DRIFT_THRESHOLD above). Below that, we trust
+    // local prediction completely and only trim the input buffer — this is
+    // what stops constant micro-corrections from fighting prediction on
+    // every single snapshot.
+    const myServerState = msg.players.find((p) => p.id === currentUser.id);
+    if (myServerState) {
+      const wasAlive = myAlive;
+      myHealth = myServerState.health;
+      myAlive  = myServerState.alive;
+
+      if (!myAlive) {
+        respawnAt = performance.now() + myServerState.respawnInMs;
+      } else {
+        const dx = myServerState.x - sim.x, dy = myServerState.y - sim.y;
+        const drift2 = dx * dx + dy * dy;
+
+        if (drift2 > FLOAT_DRIFT_THRESHOLD * FLOAT_DRIFT_THRESHOLD) {
+          // Visible desync — snap to authoritative state and replay
+          // whatever inputs the server hasn't accounted for yet, so we
+          // land back "at now" instead of freezing in the past.
+          sim.x       = myServerState.x;
+          sim.y       = myServerState.y;
+          sim.vy      = myServerState.vy;
+          moveVel     = myServerState.moveVel;
+          onGround    = myServerState.onGround;
+          jumpsUsed   = myServerState.jumpsUsed;
+          jumpKeyHeld = myServerState.jumpKeyHeld;
+
+          while (pendingInputs.length && pendingInputs[0].seq <= myServerState.lastInputSeq) {
+            pendingInputs.shift();
+          }
+          for (const rec of pendingInputs) {
+            stepPlayerPhysics(sim, rec.input, FIXED_DT, myHealth);
+          }
+        } else {
+          // Close enough to be invisible — don't touch sim at all, just
+          // drop the inputs the server has confirmed so the buffer doesn't
+          // grow unbounded.
+          while (pendingInputs.length && pendingInputs[0].seq <= myServerState.lastInputSeq) {
+            pendingInputs.shift();
+          }
+        }
+
+        if (!wasAlive) {
+          // Just respawned — hard-snap the *visual* position and camera too,
+          // instead of smoothly interpolating across the whole map.
+          me.x = sim.x; me.y = sim.y; me.vy = sim.vy;
+          prevSimX = sim.x; prevSimY = sim.y;
+          const viewW = canvas.width / ZOOM, viewH = canvas.height / ZOOM;
+          camera.x = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
+          camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
+        }
+      }
+    }
+
+    // ── Other players: replace presence wholesale from the snapshot ──
+    const seenIds = new Set();
+    msg.players.forEach((p) => {
+      if (p.id === currentUser.id) return;
+      seenIds.add(p.id);
+      const existing = others.get(p.id);
+      if (existing) {
+        existing.tx = p.x; existing.ty = p.y;
+        existing.username = p.username; existing.color = p.color;
+        existing.health = p.health; existing.alive = p.alive;
+        existing.updated_at = Date.now();
+      } else {
+        others.set(p.id, {
+          id: p.id, username: p.username, color: p.color,
+          x: p.x, y: p.y, tx: p.x, ty: p.y,
+          health: p.health, alive: p.alive,
+          updated_at: Date.now(), chatText: '', chatAt: 0
+        });
+      }
+    });
+    others.forEach((_, id) => { if (!seenIds.has(id)) others.delete(id); });
+
+    // ── Bullets: match our own predicted shots to their server twin,
+    // create/update everyone else's from the snapshot, drop anything the
+    // server no longer knows about (it hit something).
+    const seenBulletIds = new Set();
+    (msg.bullets || []).forEach((sb) => {
+      seenBulletIds.add(sb.id);
+      const existing = bullets.get(sb.id);
+      if (existing) {
+        existing.tx = sb.x; existing.ty = sb.y; existing.mode = 'synced';
+        return;
+      }
+      if (sb.ownerId === currentUser.id) {
+        let predictedId = null;
+        bullets.forEach((b, id) => {
+          if (!predictedId && b.mode === 'predicted' && b.ownerId === currentUser.id) predictedId = id;
+        });
+        if (predictedId) {
+          const b = bullets.get(predictedId);
+          bullets.delete(predictedId);
+          b.tx = sb.x; b.ty = sb.y; b.mode = 'synced';
+          bullets.set(sb.id, b);
+          return;
+        }
+      }
+      const ownerColor = sb.ownerId === currentUser.id
+        ? myColor
+        : ((others.get(sb.ownerId) || {}).color || '#fff');
+      bullets.set(sb.id, {
+        ownerId: sb.ownerId, color: ownerColor,
+        x: sb.x, y: sb.y, tx: sb.x, ty: sb.y, mode: 'synced'
+      });
+    });
+    bullets.forEach((b, id) => {
+      if (seenBulletIds.has(id)) return;
+      // Predicted bullets manage their own lifecycle locally (bounds/
+      // platform/hit checks run every frame in updateBullets) — they don't
+      // need to appear in a snapshot to be legitimately still alive. A
+      // fast/laggy round-trip can easily take longer than one tick, and
+      // pruning on a short timer here was deleting the prediction before
+      // its real server-side match ever showed up — so when the real one
+      // finally arrived, there was nothing left to match it against, and a
+      // brand-new bullet got created from scratch. Looked exactly like a
+      // second shot. Only a generous safety-net timeout remains, purely to
+      // avoid a permanent leak in a truly pathological case (e.g. it
+      // resolved same-tick server-side and will just never appear in any
+      // snapshot at all).
+      if (b.mode === 'predicted' && performance.now() - b.createdAt < 3000) return;
+      bullets.delete(id);
+    });
+
+    // ── Events: visual/audio feedback only, damage is already reflected
+    // above via myHealth/others[].health from the snapshot itself.
+    (msg.events || []).forEach((ev) => {
+      if (ev.kind === 'impact') {
+        impacts.push({ x: ev.x, y: ev.y, color: '#9aa1b2', at: performance.now() });
+      } else if (ev.kind === 'hit') {
+        impacts.push({ x: ev.x, y: ev.y, color: '#ff6b6b', at: performance.now() });
+        if (ev.targetId === currentUser.id) {
+          hitFlashAt   = performance.now();
+          lastDamageAt = performance.now();
+        }
+        if (ev.shooterId === currentUser.id) {
+          // Skip the duplicate spark/number if updateBullets already showed
+          // this exact hit as a prediction a moment ago — this is just the
+          // server catching up to confirm something the shooter already saw.
+          const alreadyShown = (performance.now() - hitLandedAt) < 250;
+          hitLandedAt = performance.now();
+          if (!alreadyShown) {
+            impacts.push({
+              x: ev.x, y: ev.y, color: '#ffd166',
+              at: performance.now(), text: '-' + (ev.damage || BULLET_DAMAGE)
+            });
+          }
+        }
+      } else if (ev.kind === 'kill') {
+        if (ev.shooterId === currentUser.id || ev.targetId === currentUser.id) refreshLeaderboard();
+      }
+    });
+  }
+
+  // ─── Game loop ───────────────────────────────────────────────────────────────
+  let lastFrame = performance.now();
+
+  // Local prediction now runs on a fixed 20Hz tick (matching the server's
+  // TICK_HZ exactly) instead of a variable per-frame dt. That's what makes
+  // replay-based reconciliation possible: each tick corresponds to exactly
+  // one input we can re-send and re-apply in lockstep with the server.
+  const FIXED_DT = 1 / BROADCAST_HZ;
+
+  // `sim` is the true predicted physics state — what the server will
+  // eventually agree with. `me` (declared earlier) is the *smoothed render
+  // position* the rest of the game (camera, drawing, shooting origin, aim
+  // assist) reads — interpolated between the last two sim ticks each frame
+  // so 20Hz physics still looks like buttery 60fps motion.
+  let sim = { x: me.x, y: me.y, vy: me.vy };
+  let prevSimX = sim.x, prevSimY = sim.y;
+  let fixedAccumulator = 0;
+
+  let inputSeq = 0;
+  // Inputs we've sent but the server hasn't confirmed processing yet (via
+  // lastInputSeq in a snapshot). On every 'state' message we drop whatever
+  // it's already accounted for and replay the rest on top of its
+  // authoritative position — see applyServerState. This is what fixes
+  // rubber-banding: without it, reconciliation would be comparing our
+  // *current* prediction against a position the server computed one
+  // round-trip ago, which fights itself every single snapshot.
+  const pendingInputs = [];
+
+  // Pure function, deliberately mirroring physics.js's stepPlayer on the
+  // server exactly (same order of operations, same constants) — this is
+  // what's re-run during replay, so it has to produce the same result the
+  // server would for the same inputs.
+  function stepPlayerPhysics(state, input, dt, health) {
+    let dxInput = 0;
+    if (input.left)  dxInput -= 1;
+    if (input.right) dxInput += 1;
+
+    const topSpeed = health <= LOW_HEALTH_THRESHOLD
+      ? BASE_MOVE_SPEED * LOW_HEALTH_SPEED_MULT
+      : BASE_MOVE_SPEED;
+
+    if (dxInput !== 0) {
+      moveVel += dxInput * MOVE_ACCEL * dt;
+      moveVel = Math.max(-topSpeed, Math.min(topSpeed, moveVel));
+    } else {
+      const friction = MOVE_FRICTION * dt;
+      if (moveVel > 0) moveVel = Math.max(0, moveVel - friction);
+      else if (moveVel < 0) moveVel = Math.min(0, moveVel + friction);
+    }
+    moveVel = Math.max(-topSpeed, Math.min(topSpeed, moveVel));
+
+    state.x += moveVel * dt;
+    state.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, state.x));
+
+    if (input.jump && !jumpKeyHeld) {
+      if (onGround) {
+        state.vy = JUMP_VELOCITY;
+        onGround = false;
+        jumpsUsed = 1;
+      } else if (jumpsUsed === 1) {
+        state.vy = DOUBLE_JUMP_VELOCITY;
+        jumpsUsed = 2;
+      }
+    }
+    jumpKeyHeld = !!input.jump;
+
+    state.vy = Math.min(state.vy + GRAVITY * dt, MAX_FALL_SPEED);
+    const prevBottom = state.y + PLAYER_SIZE / 2;
+    state.y += state.vy * dt;
+
+    onGround = false;
+    const half = PLAYER_SIZE / 2;
+    const feetY = state.y + half;
+    const left  = state.x - half * 0.8;
+    const right = state.x + half * 0.8;
+
+    for (const p of platforms) {
+      const withinX = right > p.x && left < p.x + p.w;
+      if (!withinX) continue;
+      const platTop = p.y;
+      if (state.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
+        state.y = platTop - half;
+        state.vy = 0;
+        onGround = true;
+        jumpsUsed = 0;
+        break;
+      }
+    }
+
+    if (state.y - half < 0) { state.y = half; state.vy = Math.max(state.vy, 0); }
+    if (state.y + half > WORLD_H) { state.y = WORLD_H - half; state.vy = 0; onGround = true; jumpsUsed = 0; }
+
+    return state;
+  }
+
+  // Aim is never physically simulated (server just stores whatever angle
+  // you last reported), so it isn't part of replay/reconciliation at all —
+  // it runs continuously every render frame for max responsiveness.
+  function updateAim(dt, typing) {
+    if (typing) return;
+
+    const assist = findAimAssistTarget();
+
+    let rotateSpeed = AIM_ROTATE_SPEED;
+    if (assist) {
+      const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE;
+      rotateSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_SLOWDOWN * closeness);
+    }
+
+    if (keys['i']) aimAngle -= rotateSpeed * dt;
+    if (keys['p']) aimAngle += rotateSpeed * dt;
+
+    if (assist) {
+      const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE;
+      const gap = angleDiff(aimAngle, assist.angle);
+      const maxTrack = AIM_ASSIST_TRACK_SPEED * closeness * dt;
+      aimAngle += Math.max(-maxTrack, Math.min(maxTrack, gap));
+    }
+
+    if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
+    if (aimAngle < -Math.PI) aimAngle += Math.PI * 2;
+  }
+
+  // Runs exactly one 20Hz physics tick: builds this tick's input, steps
+  // `sim` with it, records it in the replay buffer, and sends it to the
+  // server tagged with its sequence number.
+  function fixedStep(typing) {
+    const input = {
+      left:  !typing && !!(keys['a'] || keys['arrowleft']),
+      right: !typing && !!(keys['d'] || keys['arrowright']),
+      jump:  !typing && !!(keys['w'] || keys['arrowup'] || keys[' '])
+    };
+
+    inputSeq++;
+    stepPlayerPhysics(sim, input, FIXED_DT, myHealth);
+    pendingInputs.push({ seq: inputSeq, input });
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'input', seq: inputSeq,
+        left: input.left, right: input.right, jump: input.jump,
+        aimAngle
+      }));
+    }
+  }
+
+  function loop() {
+    const now = performance.now();
+    const dt = Math.min((now - lastFrame) / 1000, 0.05);
+    lastFrame = now;
+
+    const typing = document.activeElement === $chatInput;
+
+    // Alive/dead and respawn timing are purely server-driven (see
+    // applyServerState) — this just runs local prediction while alive.
+    if (myAlive) {
+      updateAim(dt, typing);
+
+      fixedAccumulator += dt;
+      fixedAccumulator = Math.min(fixedAccumulator, FIXED_DT * 10); // avoid a huge catch-up burst after a long background tab
+      while (fixedAccumulator >= FIXED_DT) {
+        prevSimX = sim.x; prevSimY = sim.y;
+        fixedStep(typing);
+        fixedAccumulator -= FIXED_DT;
+      }
+
+      // Render position = interpolated between the last two physics ticks,
+      // so movement still looks like 60fps even though sim only ticks at 20Hz.
+      const alpha = fixedAccumulator / FIXED_DT;
+      me.x  = lerp(prevSimX, sim.x, alpha);
+      me.y  = lerp(prevSimY, sim.y, alpha);
+      me.vy = sim.vy;
+
+      // Passive regen prediction between snapshots — the server is still
+      // the real authority (myHealth gets overwritten by each snapshot),
+      // this just keeps the health bar creeping up smoothly in between.
+      if (myHealth < MAX_HEALTH && (now - lastDamageAt) > REGEN_DELAY_MS) {
+        myHealth = Math.min(MAX_HEALTH, myHealth + REGEN_PER_SEC * dt);
+      }
+    } else {
+      fixedAccumulator = 0;
+    }
+
+    // Presence pruning is server-driven too (applyServerState drops anyone
+    // missing from the snapshot) — this is just per-frame visual smoothing.
+    others.forEach((p) => {
+      p.x = lerp(p.x, p.tx, LERP_FACTOR);
+      p.y = lerp(p.y, p.ty, LERP_FACTOR);
+    });
+
+    updateBullets(dt);
+    updateCamera(dt);
+
+    draw();
+  }
+
+  // Damage, death, and despawn are all decided server-side now (see
+  // applyServerState's bullet reconciliation + events handling). This just
+  // moves what's currently on screen: predicted bullets get real local
+  // physics for instant feedback the moment they're fired; everything else
+  // (server-confirmed bullets, including our own once matched) blends
+  // toward the latest authoritative position each snapshot.
+  //
+  // Predicted bullets also get an instant, purely-cosmetic hit check
+  // against `others` (client-only, mirrors the server's HIT_RADIUS check
+  // just for visual timing) — this is what makes the shooter see their
+  // impact spark immediately instead of waiting a full round-trip for the
+  // server's real 'hit' event. Damage/kills are never decided here; if the
+  // server disagrees (rare — target had already moved by the time the shot
+  // actually got there server-side), the spark just isn't followed by a
+  // real hit and nothing else happens.
+  const PREDICTED_BULLET_MAX_STEP = 6; // px — matches the server's tunneling fix
+
+  function updateBullets(dt) {
+    bullets.forEach((b, id) => {
+      if (b.mode === 'predicted') {
+        const totalDist = Math.hypot(b.vx, b.vy) * dt;
+        const steps = Math.max(1, Math.ceil(totalDist / PREDICTED_BULLET_MAX_STEP));
+        const stepDt = dt / steps;
+
+        for (let s = 0; s < steps; s++) {
+          b.vy += BULLET_GRAVITY * stepDt;
+          b.x += b.vx * stepDt;
+          b.y += b.vy * stepDt;
+
+          if (b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) { bullets.delete(id); return; }
+
+          let hitPlatform = false;
+          for (const p of platforms) {
+            if (b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h) { hitPlatform = true; break; }
+          }
+          if (hitPlatform) {
+            bullets.delete(id);
+            return; // no local impact spark here — the server's own impact event covers it
+          }
+
+          let predictedHit = null;
+          others.forEach((p) => {
+            if (predictedHit || p.alive === false) return;
+            const ddx = b.x - p.x, ddy = b.y - p.y;
+            if (ddx * ddx + ddy * ddy <= CLIENT_HIT_RADIUS * CLIENT_HIT_RADIUS) predictedHit = p;
+          });
+          if (predictedHit) {
+            bullets.delete(id);
+            hitLandedAt = performance.now();
+            impacts.push({
+              x: b.x, y: b.y, color: '#ffd166',
+              at: performance.now(), text: '-' + BULLET_DAMAGE
+            });
+            return;
+          }
+        }
+      } else {
+        b.x = lerp(b.x, b.tx, BULLET_LERP_FACTOR);
+        b.y = lerp(b.y, b.ty, BULLET_LERP_FACTOR);
+      }
+    });
+  }
+
+  // ─── Rendering ───────────────────────────────────────────────────────────────
+  function drawHealthBar(x, y, health, isMe) {
+    const w = 32, h = 5;
+    const bx = x - w / 2, by = y - PLAYER_SIZE / 2 - 20;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(bx, by, w, h);
+    const pct = Math.max(0, health) / MAX_HEALTH;
+    ctx.fillStyle = pct > 0.5 ? '#7ee787' : (pct > 0.25 ? '#ffd166' : '#ff6b6b');
+    ctx.fillRect(bx, by, w * pct, h);
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
+  // Fading speech-bubble textbox above a player's head. Fades over the last
+  // 40% of its CHAT_BUBBLE_MS lifetime, then simply stops being drawn.
+  function drawChatBubble(x, y, text, ageMs) {
+    if (!text || ageMs >= CHAT_BUBBLE_MS) return;
+
+    const fadeStart = CHAT_BUBBLE_MS * 0.6;
+    let alpha = 1;
+    if (ageMs > fadeStart) {
+      alpha = 1 - (ageMs - fadeStart) / (CHAT_BUBBLE_MS - fadeStart);
+    }
+    alpha = Math.max(0, Math.min(1, alpha));
+
+    ctx.font = '12px Arial';
+    const paddingX = 8;
+    const textW = ctx.measureText(text).width;
+    const boxW = Math.min(textW + paddingX * 2, 220);
+    const boxH = 20;
+    const boxX = x - boxW / 2;
+    const boxY = y - PLAYER_SIZE / 2 - 42;
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(20,22,28,0.88)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    roundRect(ctx, boxX, boxY, boxW, boxH, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#e9ebf1';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, boxY + boxH / 2 + 1, boxW - paddingX);
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
+  }
+
+  // Small "gun barrel" line showing the current O/P aim direction.
+  function drawAimLine(x, y, angle, color) {
+    const innerR = PLAYER_SIZE / 2 + 2;
+    const outerR = PLAYER_SIZE / 2 + 16;
+    const sx = x + Math.cos(angle) * innerR;
+    const sy = y + Math.sin(angle) * innerR;
+    const ex = x + Math.cos(angle) * outerR;
+    const ey = y + Math.sin(angle) * outerR;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(ex, ey, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Dotted preview of where a bullet fired right now would travel, using the
+  // exact same speed/gravity model as real bullets so it's an honest predictor.
+  // This is just a rendering budget for the preview line — real bullets now
+  // fly until they hit something, with no time limit.
+  const TRAJECTORY_STEP_MS = 9;
+  const TRAJECTORY_PREVIEW_MS = 1400;
+  const TRAJECTORY_MAX_STEPS = Math.ceil(TRAJECTORY_PREVIEW_MS / TRAJECTORY_STEP_MS);
+
+  function drawTrajectoryPreview(x, y, angle, color) {
+    const dt = TRAJECTORY_STEP_MS / 1000;
+    let px = x, py = y;
+    let vx = Math.cos(angle) * BULLET_SPEED;
+    let vy = Math.sin(angle) * BULLET_SPEED;
+
+    ctx.fillStyle = color;
+    for (let i = 1; i <= TRAJECTORY_MAX_STEPS; i++) {
+      vy += BULLET_GRAVITY * dt;
+      px += vx * dt;
+      py += vy * dt;
+
+      if (px < 0 || px > WORLD_W || py < 0 || py > WORLD_H) break;
+
+      let blocked = false;
+      for (const p of platforms) {
+        if (px > p.x && px < p.x + p.w && py > p.y && py < p.y + p.h) { blocked = true; break; }
+      }
+      if (blocked) break;
+
+      const fade = 1 - i / TRAJECTORY_MAX_STEPS;
+      ctx.globalAlpha = Math.max(0.08, fade * 0.55);
+      ctx.beginPath();
+      ctx.arc(px, py, 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawPlayer(x, y, color, label, isMe, health, alive) {
+    if (!alive) {
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, PLAYER_SIZE / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    ctx.shadowColor = isMe ? 'rgba(110,231,200,0.35)' : 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur  = isMe ? 12 : 6;
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, PLAYER_SIZE / 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (isMe) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth   = 2;
+      ctx.stroke();
+    }
+
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle   = '#e9ebf1';
+    ctx.font        = '12px Arial';
+    ctx.textAlign   = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur  = 4;
+    ctx.fillText(label, x, y - PLAYER_SIZE / 2 - 6);
+    ctx.shadowBlur  = 0;
+
+    drawHealthBar(x, y, health, isMe);
+  }
+
+  function drawBullets() {
+    bullets.forEach((b) => {
+      ctx.fillStyle = b.color || '#fff';
+      ctx.shadowColor = b.color || '#fff';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, BULLET_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+  }
+
+  // Transient hit-effect bursts in world space: an expanding ring at the
+  // impact point, plus (for hits you land) a floating damage number that
+  // drifts up and fades — so both sides of a hit get feedback.
+  function drawImpacts(nowPerf) {
+    for (let i = impacts.length - 1; i >= 0; i--) {
+      const imp = impacts[i];
+      const age = nowPerf - imp.at;
+      if (age > IMPACT_DURATION_MS) { impacts.splice(i, 1); continue; }
+
+      const t = age / IMPACT_DURATION_MS;
+      const alpha = 1 - t;
+      const radius = 4 + t * 16;
+
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = imp.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(imp.x, imp.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      if (imp.text) {
+        ctx.fillStyle = imp.color;
+        ctx.font = 'bold 13px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(imp.text, imp.x, imp.y - 14 - t * 18);
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Colored radial vignette (transparent centre, colored edges) used for
+  // both the low-health pulse and the sharper on-hit flash.
+  function drawVignette(colorStr) {
+    const cx = canvas.width / 2, cy = canvas.height / 2;
+    const g = ctx.createRadialGradient(
+      cx, cy, Math.min(canvas.width, canvas.height) * 0.28,
+      cx, cy, Math.max(canvas.width, canvas.height) * 0.72
+    );
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, colorStr);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Screen-space effects: a slow pulsing red vignette while at or below
+  // half health (a "heartbeat"), plus a sharper, faster flash right when
+  // a hit lands so you know you got tagged.
+  function drawScreenEffects(nowPerf) {
+    if (myAlive && myHealth > 0 && myHealth <= LOW_HEALTH_THRESHOLD) {
+      const pulse = 0.5 + 0.5 * Math.sin(nowPerf / 300); // ~0..1, ~1.9s cycle
+      const alpha = 0.16 + 0.16 * pulse;
+      drawVignette(`rgba(255,40,40,${alpha.toFixed(3)})`);
+    }
+
+    const sinceHit = nowPerf - hitFlashAt;
+    if (sinceHit >= 0 && sinceHit < HIT_FLASH_MS) {
+      const alpha = 0.55 * (1 - sinceHit / HIT_FLASH_MS);
+      drawVignette(`rgba(255,20,20,${alpha.toFixed(3)})`);
+    }
+
+    const sinceLanded = nowPerf - hitLandedAt;
+    if (sinceLanded >= 0 && sinceLanded < HIT_FLASH_MS) {
+      const alpha = 0.5 * (1 - sinceLanded / HIT_FLASH_MS);
+      drawVignette(`rgba(70,150,255,${alpha.toFixed(3)})`);
+    }
+  }
+
+  // Draws an edge arrow pointing toward each alive player who is currently
+  // outside the camera's viewport, so they're never just "gone" off-screen
+  // in a world this big.
+  function drawOffscreenIndicators(viewW, viewH) {
+    const centerWX = camera.x + viewW / 2;
+    const centerWY = camera.y + viewH / 2;
+    const margin = 36;
+    const halfW = canvas.width / 2 - margin;
+    const halfH = canvas.height / 2 - margin;
+
+    others.forEach((p) => {
+      if (p.alive === false) return;
+      const visible = p.x >= camera.x && p.x <= camera.x + viewW &&
+                      p.y >= camera.y && p.y <= camera.y + viewH;
+      if (visible) return;
+
+      const dx = p.x - centerWX;
+      const dy = p.y - centerWY;
+      if (dx === 0 && dy === 0) return;
+      const angle = Math.atan2(dy, dx);
+
+      const scaleX = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+      const scaleY = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+      const scale = Math.min(scaleX, scaleY);
+
+      const sx = canvas.width / 2 + dx * scale;
+      const sy = canvas.height / 2 + dy * scale;
+      const color = p.color || '#6ea8ff';
+
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(angle);
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.moveTo(14, 0);
+      ctx.lineTo(-8, -8);
+      ctx.lineTo(-8, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      ctx.fillStyle = '#e9ebf1';
+      ctx.font = '11px Arial';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 3;
+      ctx.fillText(p.username || 'Anon', sx - Math.cos(angle) * 24, sy - Math.sin(angle) * 24 + 4);
+      ctx.shadowBlur = 0;
+    });
+  }
+
+  function draw() {
+    const viewW = canvas.width / ZOOM;
+    const viewH = canvas.height / ZOOM;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.scale(ZOOM, ZOOM);
+    ctx.translate(-camera.x, -camera.y);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth   = 1;
+    const gridStartX = Math.floor(camera.x / 40) * 40;
+    const gridStartY = Math.floor(camera.y / 40) * 40;
+    for (let gx = gridStartX; gx < camera.x + viewW; gx += 40) {
+      ctx.beginPath(); ctx.moveTo(gx, camera.y); ctx.lineTo(gx, camera.y + viewH); ctx.stroke();
+    }
+    for (let gy = gridStartY; gy < camera.y + viewH; gy += 40) {
+      ctx.beginPath(); ctx.moveTo(camera.x, gy); ctx.lineTo(camera.x + viewW, gy); ctx.stroke();
+    }
+
+    platforms.forEach((p) => {
+      ctx.fillStyle = '#343947';
+      ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.fillStyle = '#4a5066';
+      ctx.fillRect(p.x, p.y, p.w, 4);
+    });
+
+    drawBullets();
+
+    const nowPerf = performance.now();
+
+    drawImpacts(nowPerf);
+
+    let liveCount = 1;
+    others.forEach((p) => {
+      liveCount++;
+      const alive = p.alive !== false;
+      drawPlayer(p.x, p.y, p.color || '#6ea8ff', p.username || 'Anon', false, p.health ?? MAX_HEALTH, alive);
+      if (alive && p.chatText) {
+        drawChatBubble(p.x, p.y, p.chatText, nowPerf - (p.chatAt || 0));
+      }
+    });
+
+    drawPlayer(me.x, me.y, myColor, myUsername, true, myHealth, myAlive);
+    if (myAlive) {
+      drawTrajectoryPreview(me.x, me.y, aimAngle, myColor);
+      drawAimLine(me.x, me.y, aimAngle, myColor);
+    }
+    if (myAlive && myChatBubbleText) {
+      drawChatBubble(me.x, me.y, myChatBubbleText, nowPerf - myChatBubbleAt);
+    }
+
+    ctx.restore();
+
+    drawScreenEffects(nowPerf);
+    drawOffscreenIndicators(viewW, viewH);
+
+    if (!myAlive) {
+      const secsLeft = Math.max(0, (respawnAt - performance.now()) / 1000);
+      ctx.fillStyle = 'rgba(10,12,16,0.55)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ff6b6b';
+      ctx.font = 'bold 28px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('You died', canvas.width / 2, canvas.height / 2 - 10);
+      ctx.fillStyle = '#e9ebf1';
+      ctx.font = '15px Arial';
+      ctx.fillText(`Respawning in ${secsLeft.toFixed(1)}s`, canvas.width / 2, canvas.height / 2 + 20);
+    }
+
+    $playerCount.textContent = liveCount;
+  }
+
+  init();
+})();
+</script>
+
+</body>
+</html>
