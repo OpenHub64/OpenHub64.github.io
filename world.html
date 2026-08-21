@@ -823,14 +823,21 @@
   // Reconciles local prediction against one authoritative 'state' snapshot:
   // our own position/health/alive, every other player's position, and the
   // full bullet set — plus this tick's hit/kill/impact events for effects.
+  // Below this, any client/server disagreement is invisible anyway (sub-
+  // pixel jitter from floating point, or the kind of 1-tick lag that
+  // resolves itself next tick) — reconciling it just introduces its own
+  // micro-corrections for no visible benefit. Above it, drift has become
+  // visible — most commonly as "floating" (you're predicting solid ground
+  // under you that the server doesn't agree exists, so you're standing on
+  // nothing as far as it's concerned) — and is worth actually fixing.
+  const FLOAT_DRIFT_THRESHOLD = 40; // px
+
   function applyServerState(msg) {
-    // ── Self: reset to the server's authoritative state for the input it
-    // has actually processed (lastInputSeq), then replay whatever we've
-    // sent since that hasn't been accounted for yet. This is the fix for
-    // rubber-banding — the naive version of this compared our *current*
-    // prediction against a position from one round-trip ago and fought
-    // itself every snapshot. Replaying catches the authoritative state
-    // back up to "now" instead of yanking "now" back to the past.
+    // ── Self: only correct position when drift is big enough to actually
+    // look wrong (see FLOAT_DRIFT_THRESHOLD above). Below that, we trust
+    // local prediction completely and only trim the input buffer — this is
+    // what stops constant micro-corrections from fighting prediction on
+    // every single snapshot.
     const myServerState = msg.players.find((p) => p.id === currentUser.id);
     if (myServerState) {
       const wasAlive = myAlive;
@@ -840,19 +847,34 @@
       if (!myAlive) {
         respawnAt = performance.now() + myServerState.respawnInMs;
       } else {
-        sim.x       = myServerState.x;
-        sim.y       = myServerState.y;
-        sim.vy      = myServerState.vy;
-        moveVel     = myServerState.moveVel;
-        onGround    = myServerState.onGround;
-        jumpsUsed   = myServerState.jumpsUsed;
-        jumpKeyHeld = myServerState.jumpKeyHeld;
+        const dx = myServerState.x - sim.x, dy = myServerState.y - sim.y;
+        const drift2 = dx * dx + dy * dy;
 
-        while (pendingInputs.length && pendingInputs[0].seq <= myServerState.lastInputSeq) {
-          pendingInputs.shift();
-        }
-        for (const rec of pendingInputs) {
-          stepPlayerPhysics(sim, rec.input, FIXED_DT, myHealth);
+        if (drift2 > FLOAT_DRIFT_THRESHOLD * FLOAT_DRIFT_THRESHOLD) {
+          // Visible desync — snap to authoritative state and replay
+          // whatever inputs the server hasn't accounted for yet, so we
+          // land back "at now" instead of freezing in the past.
+          sim.x       = myServerState.x;
+          sim.y       = myServerState.y;
+          sim.vy      = myServerState.vy;
+          moveVel     = myServerState.moveVel;
+          onGround    = myServerState.onGround;
+          jumpsUsed   = myServerState.jumpsUsed;
+          jumpKeyHeld = myServerState.jumpKeyHeld;
+
+          while (pendingInputs.length && pendingInputs[0].seq <= myServerState.lastInputSeq) {
+            pendingInputs.shift();
+          }
+          for (const rec of pendingInputs) {
+            stepPlayerPhysics(sim, rec.input, FIXED_DT, myHealth);
+          }
+        } else {
+          // Close enough to be invisible — don't touch sim at all, just
+          // drop the inputs the server has confirmed so the buffer doesn't
+          // grow unbounded.
+          while (pendingInputs.length && pendingInputs[0].seq <= myServerState.lastInputSeq) {
+            pendingInputs.shift();
+          }
         }
 
         if (!wasAlive) {
