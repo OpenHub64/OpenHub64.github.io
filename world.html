@@ -200,6 +200,16 @@
   const SUPABASE_ANON_KEY = 'sb_publishable_ETpMX8Y6EkfUU725IhcpaQ_l5D6XreY';
   const supabaseClient    = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+  // ⚠️ Same Railway domain as client-snippet.js / test-combat.js:
+  const SERVER_URL = 'wss://openhub-server-production.up.railway.app';
+
+  // Reconciliation: client-side prediction runs locally every frame for
+  // instant feel, then gets nudged toward the server's authoritative
+  // position each time a 'state' snapshot arrives. Small drift is
+  // corrected gently (imperceptible); large drift (e.g. a missed platform
+  // collision edge case) is snapped instantly rather than visibly sliding.
+  const BULLET_LERP_FACTOR  = 0.35; // bullets are fast — snappier than player lerp
+
   const $status      = document.getElementById('status');
   const $gameWrap    = document.getElementById('gameWrap');
   const $loginGate   = document.getElementById('loginGate');
@@ -226,12 +236,7 @@
   const DOUBLE_JUMP_VELOCITY = -480;
   const MAX_FALL_SPEED = 900;
   const BROADCAST_HZ  = 20;        // broadcast ticks per second (50ms) — pure pub/sub, zero DB writes during movement
-  const DB_SYNC_MS    = 3000;      // write to DB every 3s just to keep presence alive for join-late players
-  const STALE_MS      = 20000;     // remove players silent this long (must exceed HEARTBEAT_MS with margin)
   const LERP_FACTOR   = 0.18;      // interpolation per frame for other players — tune 0.10 (smoother) – 0.25 (snappier)
-
-  let recentKillText = '';
-  let recentKillAt = -Infinity;
 
   // Camera follows the local player around the (much bigger) world. Position
   // is the world coordinate of the viewport's top-left corner, clamped so it
@@ -250,11 +255,8 @@
   function updateCamera(dt) {
     const viewW = canvas.width / ZOOM;
     const viewH = canvas.height / ZOOM;
-    // Follow the interpolated render position, not the raw fixed-step sim
-    // position — otherwise the camera and the character it's following
-    // would be stepping at different rates and drift apart every frame.
-    const targetX = Math.max(0, Math.min(WORLD_W - viewW, renderMe.x - viewW / 2));
-    const targetY = Math.max(0, Math.min(WORLD_H - viewH, renderMe.y - viewH / 2));
+    const targetX = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
+    const targetY = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
     const alpha = Math.min(1, CAMERA_SMOOTH_SPEED * dt);
     camera.x = lerp(camera.x, targetX, alpha);
     camera.y = lerp(camera.y, targetY, alpha);
@@ -266,8 +268,7 @@
   const BULLET_SPEED     = 760;    // px per second
   const BULLET_GRAVITY    = 420;   // px/s^2 — slight arc on bullets, gentler than player gravity
   const BULLET_RADIUS    = 4;
-  const HIT_RADIUS       = PLAYER_SIZE / 2 + BULLET_RADIUS;
-  const RESPAWN_MS       = 2500;
+  const RESPAWN_MS       = 2500; // display-only fallback; real timing comes from server's respawnInMs
   const SHOOT_COOLDOWN_MS = 220;
   const REGEN_DELAY_MS   = 4000;  // no damage for this long before health starts regenerating
   const REGEN_PER_SEC    = 4;     // hp/sec regen rate once it kicks in
@@ -326,31 +327,6 @@
   let moveVel    = 0; // horizontal velocity — accelerates/decelerates rather than snapping
   let onGround   = false;
   let jumpsUsed  = 0;
-
-  // Fixed-step movement + input replay buffer. Movement/jump/gravity/
-  // collision run in fixed 50ms steps — identical to the server's own tick
-  // — instead of once per variable-length render frame. That's what makes
-  // replay below actually reproduce the server's result: stepping the same
-  // equations by two different-sized dt's is not guaranteed to land in the
-  // same place, especially right at a platform edge, which was the root
-  // cause of "I landed, the server didn't."
-  const FIXED_DT = 1 / 20; // seconds — must match index.js TICK_HZ
-  let physicsAccum = 0;
-
-  // Render-only copy of the local player's position, interpolated between
-  // the previous and current fixed-step physics state. me.x/me.y are the
-  // real simulation values (used for collision, camera *targeting* math via
-  // renderMe below, reconciliation, network sends) and only change once per
-  // 50ms physics step. draw() runs once per animation frame (~60Hz+), so if
-  // it drew me.x/me.y directly the sprite would hold still for a couple of
-  // frames, then snap, then hold again — the "moving in steps" jitter.
-  // renderMe blends the last two physics states using leftover
-  // physicsAccum as the blend factor, giving smooth motion every frame
-  // without changing simulation timing at all.
-  let prevMe = { x: me.x, y: me.y };
-  let renderMe = { x: me.x, y: me.y };
-  let inputSeq = 0;
-  const pendingInputs = []; // [{ seq, left, right, jump }], oldest first
   let jumpKeyHeld = false;
 
   let myHealth    = MAX_HEALTH;
@@ -400,46 +376,22 @@
 
   let broadcastChannelRef = null;
 
-  // ── Authoritative server (movement / combat / health) ──────────────────────
-  // Chat and the leaderboard stay on Supabase Realtime/Postgres (unchanged
-  // above); only movement, shooting, health, and death are resolved by the
-  // WS server now — that's what makes hits/kills/health real even if the
-  // target's tab is backgrounded.
-  //
-  // ⚠️ Same domain as client-snippet.js / test-combat.js — update if you
-  // redeploy the server somewhere else.
-  const SERVER_URL = 'wss://openhub-server-production.up.railway.app';
-
-  let ws = null;
-  let wsAuthed = false;
-  let wsReconnectDelay = 1000; // backs off on repeated failures, resets on a good connection
-  const WS_RECONNECT_MAX_MS = 8000;
-
-  // Last authoritative snapshot of *our own* player from the server. We
-  // keep predicting locally every frame (applyPhysics below) for zero-lag
-  // feel; this is only used to gently correct drift, and to know our real
-  // health/alive/respawn state, which the server — not us — decides.
-  let srvMe = null; // { x, y, vy, moveVel, onGround, jumpsUsed, jumpKeyHeld, lastInputSeq, health, alive, respawnInMs }
-
-  // Bullet ids we've already spawned a local visual copy for (own shots are
-  // spawned instantly on click; other players' shots are spawned the first
-  // time we see their id in a server snapshot). Prevents duplicates.
-  const seenBulletIds = new Set();
-
+  // Shooting is now server-authoritative: we tell the server "I shot" and
+  // it decides what actually happens (rate limit, bullet spawn, hits).
+  // We still spawn a local *predicted* bullet immediately so firing feels
+  // instant — it gets reconciled against the server's own bullet for this
+  // shot the moment the next 'state' snapshot arrives (usually <=50ms
+  // later), and quietly swapped over to server-driven tracking.
   function tryShoot() {
     if (!currentUser || !myAlive) return;
     if (document.activeElement === $chatInput) return; // don't shoot while typing
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const now = performance.now();
     if (now - lastShotAt < SHOOT_COOLDOWN_MS) return;
     lastShotAt = now;
 
-    // Instant local visual feedback — the server independently resolves the
-    // real hit/damage off its own copy of your aim angle + position, so this
-    // copy is cosmetic only and never trusted for damage.
-    spawnBullet(currentUser.id, me.x, me.y, aimAngle, myColor, true);
-    if (ws && wsAuthed && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'shoot' }));
-    }
+    ws.send(JSON.stringify({ type: 'shoot' }));
+    spawnPredictedBullet(me.x, me.y, aimAngle);
   }
 
   canvas.addEventListener('mousedown', tryShoot);
@@ -452,15 +404,16 @@
     }
   });
 
-  function spawnBullet(ownerId, x, y, angle, color, isMine) {
-    const id = ownerId + ':' + (bulletSeq++) + ':' + Date.now();
+  function spawnPredictedBullet(x, y, angle) {
+    const id = 'predicted:' + (bulletSeq++) + ':' + Date.now();
     bullets.set(id, {
-      ownerId, color,
-      x, y,
+      ownerId: currentUser.id, color: myColor,
+      x, y, tx: x, ty: y,
       vx: Math.cos(angle) * BULLET_SPEED,
-      vy: Math.sin(angle) * BULLET_SPEED
+      vy: Math.sin(angle) * BULLET_SPEED,
+      mode: 'predicted',
+      createdAt: performance.now()
     });
-    return id;
   }
 
   // ─── Chat helpers ────────────────────────────────────────────────────────────
@@ -615,20 +568,9 @@
 
   function lerp(a, b, t) { return a + (b - a) * t; }
 
-  // Records a kill or death via a security-definer RPC (see the SQL — it
-  // increments the caller's own row using auth.uid() server-side, so a
-  // client can never credit/blame anyone but itself). Fire-and-forget;
-  // failures here shouldn't interrupt the game.
-  async function bumpStat(rpcName) {
-    if (!currentUser) return;
-    try {
-      await supabaseClient.rpc(rpcName, { p_username: myUsername });
-      refreshLeaderboard();
-    } catch (err) {
-      console.error('bumpStat failed:', err);
-    }
-  }
-
+  // Kills/deaths are now recorded server-side (index.js calls
+  // server_increment_kills/server_increment_deaths itself) — the client
+  // just re-reads the leaderboard whenever an event says it might have moved.
   async function refreshLeaderboard() {
     try {
       const { data, error } = await supabaseClient
@@ -759,6 +701,16 @@
     myHealth   = MAX_HEALTH;
     myAlive    = true;
 
+    // sim was seeded from `me`'s stale module-load default before this ran —
+    // resync it to the real spawn point, and clear any prediction/replay
+    // state left over from before init (there shouldn't be any yet, but a
+    // future re-init on account switch would otherwise carry stale inputs).
+    sim.x = me.x; sim.y = me.y; sim.vy = me.vy;
+    prevSimX = sim.x; prevSimY = sim.y;
+    fixedAccumulator = 0;
+    pendingInputs.length = 0;
+    inputSeq = 0;
+
     {
       const viewW = canvas.width / ZOOM;
       const viewH = canvas.height / ZOOM;
@@ -766,20 +718,15 @@
       camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
     }
 
-    const { data: existing } = await supabaseClient.from('world_players').select('*');
-    if (existing) {
-      existing.forEach((row) => {
-        if (row.id === currentUser.id) return;
-        others.set(row.id, { ...row, tx: row.x, ty: row.y, health: MAX_HEALTH, alive: true, chatText: '', chatAt: 0 });
-      });
-    }
-
-    const broadcastChannel = supabaseClient.channel('world:movement', {
+    // Chat/whisper still ride Supabase Realtime broadcast — the game
+    // server doesn't touch chat at all, so this is unchanged in spirit
+    // from before, just split off from the old movement channel.
+    const chatChannel = supabaseClient.channel('world:chat', {
       config: { broadcast: { self: false } }
     });
-    broadcastChannelRef = broadcastChannel;
+    broadcastChannelRef = chatChannel;
 
-    broadcastChannel
+    chatChannel
       .on('broadcast', { event: 'chat' }, ({ payload }) => {
         if (payload.id === currentUser.id) return;
         appendChatLine(
@@ -800,242 +747,250 @@
       })
       .subscribe();
 
-    // Movement/aim goes to the authoritative WS server, not Supabase — it
-    // owns physics, health, and combat now. Connect once we have a session.
-    // Input itself is sent per fixed physics step inside loop(), not on a
-    // separate timer — see the accumulator there.
-    connectToServer();
+    connectServer();
 
     window.addEventListener('beforeunload', () => {
-      broadcastChannel.send({
-        type: 'broadcast', event: 'leave',
-        payload: { id: currentUser.id }
-      });
+      if (ws) ws.close();
     });
 
-    // setInterval (not requestAnimationFrame) so the simulation — bullets,
-    // hit detection, damage — keeps running even when this tab is in the
-    // background. Browsers fully pause rAF on hidden tabs, which let players
-    // dodge damage just by switching away; setInterval is only throttled
-    // (typically to ~1 tick/sec) but never stops outright.
+    // setInterval (not requestAnimationFrame) so local prediction — physics,
+    // camera, bullet interpolation — keeps running even when this tab is in
+    // the background. The real simulation (hits, damage, death) now lives
+    // entirely on the server regardless of tab visibility, so this is just
+    // for smooth rendering + prediction, not correctness.
     setInterval(loop, 16);
 
     refreshLeaderboard();
     setInterval(refreshLeaderboard, 6000);
   }
 
-  // ─── Authoritative server connection ────────────────────────────────────────
-  function connectToServer() {
-    if (!currentUser) return;
+  // ─── Server connection ───────────────────────────────────────────────────────
+  let ws = null;
+  let wsReconnectDelay = 1000;
 
-    $status.textContent = 'Connecting to game server…';
-    let socket;
-    try {
-      socket = new WebSocket(SERVER_URL);
-    } catch (err) {
-      console.error('WebSocket construction failed:', err);
-      scheduleReconnect();
-      return;
-    }
-    ws = socket;
-    wsAuthed = false;
+  async function connectServer() {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) return;
 
-    socket.onopen = async () => {
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      if (!session || socket !== ws) { socket.close(); return; }
-      socket.send(JSON.stringify({ type: 'auth', token: session.access_token }));
+    $status.textContent = 'Connecting to world server…';
+    ws = new WebSocket(SERVER_URL);
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'auth', token: session.access_token }));
     };
 
-    socket.onmessage = (e) => {
+    ws.onmessage = (e) => {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
-
-      if (msg.type === 'authError') {
-        $status.textContent = 'Game server rejected session — try reloading.';
-        socket.close();
-        return;
-      }
-
-      if (msg.type === 'authOk') {
-        wsAuthed = true;
-        wsReconnectDelay = 1000; // reset backoff on a successful connection
-        $status.textContent = `Connected. You are ${myUsername}.`;
-        return;
-      }
-
-      if (msg.type === 'playerCount') {
-        return; // we already compute a live count each frame from `others`
-      }
-
-      if (msg.type === 'state') {
-        applyServerState(msg);
-        return;
-      }
+      handleServerMessage(msg);
     };
 
-    socket.onclose = () => {
-      wsAuthed = false;
-      if (socket !== ws) return; // superseded by a newer connection attempt
-      $status.textContent = 'Disconnected from game server — reconnecting…';
-      scheduleReconnect();
+    ws.onclose = () => {
+      $status.textContent = 'Disconnected — reconnecting…';
+      others.clear();
+      bullets.clear();
+      // Inputs queued before the gap don't correspond to anything the new
+      // connection's server-side player will recognize — drop them so the
+      // next reconciliation replays only fresh, post-reconnect inputs.
+      pendingInputs.length = 0;
+      setTimeout(() => {
+        wsReconnectDelay = Math.min(wsReconnectDelay * 1.5, 8000);
+        connectServer();
+      }, wsReconnectDelay);
     };
 
-    socket.onerror = (err) => {
-      console.error('Game server socket error:', err);
-    };
+    ws.onerror = () => { /* onclose fires right after and handles it */ };
   }
 
-  function scheduleReconnect() {
-    setTimeout(() => {
-      if (currentUser) connectToServer();
-    }, wsReconnectDelay);
-    wsReconnectDelay = Math.min(WS_RECONNECT_MAX_MS, wsReconnectDelay * 1.6);
+  function handleServerMessage(msg) {
+    if (msg.type === 'authOk') {
+      wsReconnectDelay = 1000;
+      myUsername = msg.username || myUsername;
+      $status.textContent = `Connected. You are ${myUsername}.`;
+      return;
+    }
+    if (msg.type === 'authError') {
+      $status.textContent = 'Auth failed: ' + msg.message;
+      return;
+    }
+    if (msg.type === 'state') {
+      applyServerState(msg);
+      return;
+    }
+    // 'playerCount' is redundant with what draw() derives from `others` — ignored.
   }
 
-  // Applies one authoritative snapshot from the server: other players'
-  // target positions (still smoothed in by the existing lerp in loop()),
-  // our own true health/alive/respawn/position, new bullets fired by other
-  // players (spawned once, then simulated locally like any other bullet),
-  // and this-tick events (hits/kills) for screen-flash/damage-number FX.
+  // Reconciles local prediction against one authoritative 'state' snapshot:
+  // our own position/health/alive, every other player's position, and the
+  // full bullet set — plus this tick's hit/kill/impact events for effects.
   function applyServerState(msg) {
-    const nowMs = Date.now();
-    const seenIds = new Set();
+    // ── Self: reset to the server's authoritative state for the input it
+    // has actually processed (lastInputSeq), then replay whatever we've
+    // sent since that hasn't been accounted for yet. This is the fix for
+    // rubber-banding — the naive version of this compared our *current*
+    // prediction against a position from one round-trip ago and fought
+    // itself every snapshot. Replaying catches the authoritative state
+    // back up to "now" instead of yanking "now" back to the past.
+    const myServerState = msg.players.find((p) => p.id === currentUser.id);
+    if (myServerState) {
+      const wasAlive = myAlive;
+      myHealth = myServerState.health;
+      myAlive  = myServerState.alive;
 
-    (msg.players || []).forEach((row) => {
-      seenIds.add(row.id);
+      if (!myAlive) {
+        respawnAt = performance.now() + myServerState.respawnInMs;
+      } else {
+        sim.x       = myServerState.x;
+        sim.y       = myServerState.y;
+        sim.vy      = myServerState.vy;
+        moveVel     = myServerState.moveVel;
+        onGround    = myServerState.onGround;
+        jumpsUsed   = myServerState.jumpsUsed;
+        jumpKeyHeld = myServerState.jumpKeyHeld;
 
-      if (currentUser && row.id === currentUser.id) {
-        const wasAlive = srvMe ? srvMe.alive : true;
-        srvMe = row;
-        myHealth = row.health;
+        while (pendingInputs.length && pendingInputs[0].seq <= myServerState.lastInputSeq) {
+          pendingInputs.shift();
+        }
+        for (const rec of pendingInputs) {
+          stepPlayerPhysics(sim, rec.input, FIXED_DT, myHealth);
+        }
 
-        if (!row.alive) {
-          // Server owns death/respawn timing now — stop local physics from
-          // fighting it, and drive the on-screen countdown off its clock.
-          myAlive = false;
-          respawnAt = performance.now() + (row.respawnInMs || 0);
-        } else if (row.alive && !wasAlive) {
-          // We just respawned server-side — snap straight to the real
-          // respawn spot (a deliberate one-time teleport, not drift) and
-          // reset local motion state so we don't carry stale velocity.
-          myAlive   = true;
-          me.x      = row.x;
-          me.y      = row.y;
-          me.vy     = 0;
-          moveVel   = 0;
-          onGround  = !!row.onGround;
-          jumpsUsed = 0;
-          lastDamageAt = -Infinity;
-          // Snap the render/interpolation copies too, or the next frame
-          // would lerp/blend from the pre-respawn spot across the map.
-          prevMe.x = renderMe.x = me.x;
-          prevMe.y = renderMe.y = me.y;
-
-          const viewW = canvas.width / ZOOM;
-          const viewH = canvas.height / ZOOM;
+        if (!wasAlive) {
+          // Just respawned — hard-snap the *visual* position and camera too,
+          // instead of smoothly interpolating across the whole map.
+          me.x = sim.x; me.y = sim.y; me.vy = sim.vy;
+          prevSimX = sim.x; prevSimY = sim.y;
+          const viewW = canvas.width / ZOOM, viewH = canvas.height / ZOOM;
           camera.x = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
           camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
-          pendingInputs.length = 0; // discard prediction history from before the respawn
-        } else if (row.alive) {
-          // Reconcile: snap straight to the server's authoritative
-          // fixed-step state for the tick it just processed (row.lastInputSeq),
-          // then replay every input we've sent since that hasn't been
-          // accounted for yet. If our prediction agreed with the server,
-          // replay reproduces the exact same end position — invisible. If
-          // it didn't (dropped packet, a stall, a real desync), this
-          // corrects it immediately and smoothly, because the correction
-          // is expressed as physics steps, not a teleport.
-          me.x      = row.x;
-          me.y      = row.y;
-          me.vy     = row.vy;
-          moveVel   = row.moveVel;
-          onGround  = row.onGround;
-          jumpsUsed = row.jumpsUsed;
-          jumpKeyHeld = row.jumpKeyHeld;
-
-          while (pendingInputs.length && pendingInputs[0].seq <= row.lastInputSeq) {
-            pendingInputs.shift();
-          }
-          for (const input of pendingInputs) {
-            stepMovement(input, FIXED_DT);
-          }
         }
-        return;
       }
+    }
 
-      const existing = others.get(row.id);
+    // ── Other players: replace presence wholesale from the snapshot ──
+    const seenIds = new Set();
+    msg.players.forEach((p) => {
+      if (p.id === currentUser.id) return;
+      seenIds.add(p.id);
+      const existing = others.get(p.id);
       if (existing) {
-        existing.tx = row.x;
-        existing.ty = row.y;
-        existing.username = row.username;
-        existing.color    = row.color;
-        existing.health   = row.health;
-        existing.alive    = row.alive;
-        existing.aimAngle = row.aimAngle;
-        existing.updated_at = nowMs;
+        existing.tx = p.x; existing.ty = p.y;
+        existing.username = p.username; existing.color = p.color;
+        existing.health = p.health; existing.alive = p.alive;
+        existing.updated_at = Date.now();
       } else {
-        others.set(row.id, {
-          id: row.id, username: row.username, color: row.color,
-          x: row.x, y: row.y, tx: row.x, ty: row.y,
-          health: row.health, alive: row.alive, aimAngle: row.aimAngle,
-          updated_at: nowMs, chatText: '', chatAt: 0
+        others.set(p.id, {
+          id: p.id, username: p.username, color: p.color,
+          x: p.x, y: p.y, tx: p.x, ty: p.y,
+          health: p.health, alive: p.alive,
+          updated_at: Date.now(), chatText: '', chatAt: 0
         });
       }
     });
-
-    // A player who's no longer in the snapshot has disconnected — drop them
-    // immediately rather than waiting on the old stale-timer.
     others.forEach((_, id) => { if (!seenIds.has(id)) others.delete(id); });
 
-    (msg.bullets || []).forEach((b) => {
-      if (b.ownerId === (currentUser && currentUser.id)) return; // our own — already rendering a local copy
-      if (seenBulletIds.has(b.id)) return;
-      seenBulletIds.add(b.id);
-      const owner = others.get(b.ownerId);
-      const angle = owner ? (owner.aimAngle || 0) : 0;
-      // Spawn from the owner's own current position/angle, not the
-      // (slightly stale-by-one-tick) bullet snapshot position, and let it
-      // fly locally from there — matches the server's own launch math in
-      // physics.js, so it tracks closely without needing per-tick sync.
-      spawnBullet(b.ownerId, owner ? owner.x : b.x, owner ? owner.y : b.y, angle, owner ? owner.color : '#ffffff', false);
+    // ── Bullets: match our own predicted shots to their server twin,
+    // create/update everyone else's from the snapshot, drop anything the
+    // server no longer knows about (it hit something).
+    const seenBulletIds = new Set();
+    (msg.bullets || []).forEach((sb) => {
+      seenBulletIds.add(sb.id);
+      const existing = bullets.get(sb.id);
+      if (existing) {
+        existing.tx = sb.x; existing.ty = sb.y; existing.mode = 'synced';
+        return;
+      }
+      if (sb.ownerId === currentUser.id) {
+        let predictedId = null;
+        bullets.forEach((b, id) => {
+          if (!predictedId && b.mode === 'predicted' && b.ownerId === currentUser.id) predictedId = id;
+        });
+        if (predictedId) {
+          const b = bullets.get(predictedId);
+          bullets.delete(predictedId);
+          b.tx = sb.x; b.ty = sb.y; b.mode = 'synced';
+          bullets.set(sb.id, b);
+          return;
+        }
+      }
+      const ownerColor = sb.ownerId === currentUser.id
+        ? myColor
+        : ((others.get(sb.ownerId) || {}).color || '#fff');
+      bullets.set(sb.id, {
+        ownerId: sb.ownerId, color: ownerColor,
+        x: sb.x, y: sb.y, tx: sb.x, ty: sb.y, mode: 'synced'
+      });
+    });
+    bullets.forEach((b, id) => {
+      if (seenBulletIds.has(id)) return;
+      // Grace period so a just-fired predicted bullet doesn't get pruned
+      // before the very first snapshot that would confirm it.
+      if (b.mode === 'predicted' && performance.now() - b.createdAt < 150) return;
+      bullets.delete(id);
     });
 
-    if (msg.events && msg.events.length) {
-      msg.events.forEach((ev) => {
-        if (ev.kind === 'impact') {
-          if (currentUser && ev.shooterId === currentUser.id) return;
-          impacts.push({ x: ev.x, y: ev.y, color: '#9aa1b2', at: performance.now() });
-        } else if (ev.kind === 'hit') {
-          if (currentUser && ev.targetId === currentUser.id) {
-            hitFlashAt = performance.now();
-            impacts.push({ x: ev.x, y: ev.y, color: '#ff6b6b', at: performance.now() });
-          }
-        } else if (ev.kind === 'kill') {
-          const killer = ev.shooterId === currentUser?.id ? myUsername : (others.get(ev.shooterId)?.username || 'Anon');
-          const victim = ev.targetId === currentUser?.id ? myUsername : (others.get(ev.targetId)?.username || 'Anon');
-          const puns = ['smashed', 'bamboozled', 'obliterated', 'rekt'];
-          const pun = puns[Math.floor(Math.random() * puns.length)];
-
-          appendChatLine(`<span class="chat-system">💀 ${victim} was ${pun} by ${killer}!</span>`);
-
-          if (ev.shooterId === currentUser?.id) {
-            recentKillText = `You killed ${victim}!`;
-            recentKillAt = performance.now();
-          }
+    // ── Events: visual/audio feedback only, damage is already reflected
+    // above via myHealth/others[].health from the snapshot itself.
+    (msg.events || []).forEach((ev) => {
+      if (ev.kind === 'impact') {
+        impacts.push({ x: ev.x, y: ev.y, color: '#9aa1b2', at: performance.now() });
+      } else if (ev.kind === 'hit') {
+        impacts.push({ x: ev.x, y: ev.y, color: '#ff6b6b', at: performance.now() });
+        if (ev.targetId === currentUser.id) {
+          hitFlashAt   = performance.now();
+          lastDamageAt = performance.now();
         }
-      });
-    }
+        if (ev.shooterId === currentUser.id) {
+          hitLandedAt = performance.now();
+          impacts.push({
+            x: ev.x, y: ev.y, color: '#ffd166',
+            at: performance.now(), text: '-' + (ev.damage || BULLET_DAMAGE)
+          });
+        }
+      } else if (ev.kind === 'kill') {
+        if (ev.shooterId === currentUser.id || ev.targetId === currentUser.id) refreshLeaderboard();
+      }
+    });
   }
 
   // ─── Game loop ───────────────────────────────────────────────────────────────
   let lastFrame = performance.now();
 
-  function stepMovement(input, dt) {
+  // Local prediction now runs on a fixed 20Hz tick (matching the server's
+  // TICK_HZ exactly) instead of a variable per-frame dt. That's what makes
+  // replay-based reconciliation possible: each tick corresponds to exactly
+  // one input we can re-send and re-apply in lockstep with the server.
+  const FIXED_DT = 1 / BROADCAST_HZ;
+
+  // `sim` is the true predicted physics state — what the server will
+  // eventually agree with. `me` (declared earlier) is the *smoothed render
+  // position* the rest of the game (camera, drawing, shooting origin, aim
+  // assist) reads — interpolated between the last two sim ticks each frame
+  // so 20Hz physics still looks like buttery 60fps motion.
+  let sim = { x: me.x, y: me.y, vy: me.vy };
+  let prevSimX = sim.x, prevSimY = sim.y;
+  let fixedAccumulator = 0;
+
+  let inputSeq = 0;
+  // Inputs we've sent but the server hasn't confirmed processing yet (via
+  // lastInputSeq in a snapshot). On every 'state' message we drop whatever
+  // it's already accounted for and replay the rest on top of its
+  // authoritative position — see applyServerState. This is what fixes
+  // rubber-banding: without it, reconciliation would be comparing our
+  // *current* prediction against a position the server computed one
+  // round-trip ago, which fights itself every single snapshot.
+  const pendingInputs = [];
+
+  // Pure function, deliberately mirroring physics.js's stepPlayer on the
+  // server exactly (same order of operations, same constants) — this is
+  // what's re-run during replay, so it has to produce the same result the
+  // server would for the same inputs.
+  function stepPlayerPhysics(state, input, dt, health) {
     let dxInput = 0;
     if (input.left)  dxInput -= 1;
     if (input.right) dxInput += 1;
 
-    const topSpeed = myHealth <= LOW_HEALTH_THRESHOLD
+    const topSpeed = health <= LOW_HEALTH_THRESHOLD
       ? BASE_MOVE_SPEED * LOW_HEALTH_SPEED_MULT
       : BASE_MOVE_SPEED;
 
@@ -1049,83 +1004,98 @@
     }
     moveVel = Math.max(-topSpeed, Math.min(topSpeed, moveVel));
 
-    me.x = me.x + moveVel * dt;
-    me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x));
+    state.x += moveVel * dt;
+    state.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, state.x));
 
     if (input.jump && !jumpKeyHeld) {
       if (onGround) {
-        me.vy = JUMP_VELOCITY;
+        state.vy = JUMP_VELOCITY;
         onGround = false;
         jumpsUsed = 1;
       } else if (jumpsUsed === 1) {
-        me.vy = DOUBLE_JUMP_VELOCITY;
+        state.vy = DOUBLE_JUMP_VELOCITY;
         jumpsUsed = 2;
       }
     }
     jumpKeyHeld = !!input.jump;
 
-    me.vy = Math.min(me.vy + GRAVITY * dt, MAX_FALL_SPEED);
-    const prevBottom = me.y + PLAYER_SIZE / 2;
-    me.y += me.vy * dt;
+    state.vy = Math.min(state.vy + GRAVITY * dt, MAX_FALL_SPEED);
+    const prevBottom = state.y + PLAYER_SIZE / 2;
+    state.y += state.vy * dt;
 
     onGround = false;
     const half = PLAYER_SIZE / 2;
-    const feetY = me.y + half;
-    const left  = me.x - half * 0.8;
-    const right = me.x + half * 0.8;
+    const feetY = state.y + half;
+    const left  = state.x - half * 0.8;
+    const right = state.x + half * 0.8;
 
     for (const p of platforms) {
       const withinX = right > p.x && left < p.x + p.w;
       if (!withinX) continue;
       const platTop = p.y;
-      if (me.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
-        me.y = platTop - half;
-        me.vy = 0;
+      if (state.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
+        state.y = platTop - half;
+        state.vy = 0;
         onGround = true;
         jumpsUsed = 0;
         break;
       }
     }
 
-    if (me.y - half < 0) { me.y = half; me.vy = Math.max(me.vy, 0); }
-    if (me.y + half > WORLD_H) { me.y = WORLD_H - half; me.vy = 0; onGround = true; jumpsUsed = 0; }
+    if (state.y - half < 0) { state.y = half; state.vy = Math.max(state.vy, 0); }
+    if (state.y + half > WORLD_H) { state.y = WORLD_H - half; state.vy = 0; onGround = true; jumpsUsed = 0; }
+
+    return state;
   }
 
-  function applyPhysics(dt, allowMoveAndJump) {
-    // Aim rotation is purely cosmetic (only the final aimAngle is ever sent
-    // to or checked by the server, for bullet direction) — it stays on the
-    // per-frame variable-dt loop below for smoothness. Movement/jump/
-    // gravity/collision run separately, in fixed steps (see loop()), so
-    // they can be replayed deterministically during reconciliation.
-    if (allowMoveAndJump) {
-      const assist = findAimAssistTarget();
+  // Aim is never physically simulated (server just stores whatever angle
+  // you last reported), so it isn't part of replay/reconciliation at all —
+  // it runs continuously every render frame for max responsiveness.
+  function updateAim(dt, typing) {
+    if (typing) return;
 
-      // Mechanic 1 — slowdown: friction that reduces turn speed the closer
-      // the aim already is to a target, so it takes more deliberate input
-      // to swing past them.
-      let rotateSpeed = AIM_ROTATE_SPEED;
-      if (assist) {
-        const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE; // 0..1, 1 = dead on
-        rotateSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_SLOWDOWN * closeness);
-      }
+    const assist = findAimAssistTarget();
 
-      if (keys['i']) aimAngle -= rotateSpeed * dt;
-      if (keys['p']) aimAngle += rotateSpeed * dt;
+    let rotateSpeed = AIM_ROTATE_SPEED;
+    if (assist) {
+      const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE;
+      rotateSpeed = AIM_ROTATE_SPEED * (1 - AIM_ASSIST_SLOWDOWN * closeness);
+    }
 
-      // Mechanic 2 — rotational tracking: separate from I/P input, gently
-      // pulls the crosshair toward the target's current angle each frame,
-      // so it keeps following a moving enemy rather than only reacting
-      // when the player turns.
-      if (assist) {
-        const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE;
-        const gap = angleDiff(aimAngle, assist.angle);
-        const maxTrack = AIM_ASSIST_TRACK_SPEED * closeness * dt;
-        aimAngle += Math.max(-maxTrack, Math.min(maxTrack, gap));
-      }
+    if (keys['i']) aimAngle -= rotateSpeed * dt;
+    if (keys['p']) aimAngle += rotateSpeed * dt;
 
-      // keep in a tidy -PI..PI range
-      if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
-      if (aimAngle < -Math.PI) aimAngle += Math.PI * 2;
+    if (assist) {
+      const closeness = 1 - assist.diff / AIM_ASSIST_TOLERANCE;
+      const gap = angleDiff(aimAngle, assist.angle);
+      const maxTrack = AIM_ASSIST_TRACK_SPEED * closeness * dt;
+      aimAngle += Math.max(-maxTrack, Math.min(maxTrack, gap));
+    }
+
+    if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
+    if (aimAngle < -Math.PI) aimAngle += Math.PI * 2;
+  }
+
+  // Runs exactly one 20Hz physics tick: builds this tick's input, steps
+  // `sim` with it, records it in the replay buffer, and sends it to the
+  // server tagged with its sequence number.
+  function fixedStep(typing) {
+    const input = {
+      left:  !typing && !!(keys['a'] || keys['arrowleft']),
+      right: !typing && !!(keys['d'] || keys['arrowright']),
+      jump:  !typing && !!(keys['w'] || keys['arrowup'] || keys[' '])
+    };
+
+    inputSeq++;
+    stepPlayerPhysics(sim, input, FIXED_DT, myHealth);
+    pendingInputs.push({ seq: inputSeq, input });
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'input', seq: inputSeq,
+        left: input.left, right: input.right, jump: input.jump,
+        aimAngle
+      }));
     }
   }
 
@@ -1136,79 +1106,39 @@
 
     const typing = document.activeElement === $chatInput;
 
-    // Death/respawn timing and health are the server's call now (see
-    // applyServerState) — we just don't run movement while dead, and don't
-    // touch me.x/me.y/myHealth ourselves while waiting for it.
+    // Alive/dead and respawn timing are purely server-driven (see
+    // applyServerState) — this just runs local prediction while alive.
     if (myAlive) {
-      // Aim rotation is cosmetic and runs every frame for smoothness (see
-      // applyPhysics). Movement/jump/gravity/collision run separately, in
-      // fixed 50ms steps, catching up via this accumulator — same pattern
-      // a physics engine uses to decouple simulation rate from frame rate.
-      applyPhysics(dt, !typing);
+      updateAim(dt, typing);
 
-      physicsAccum += dt;
-      // Guard against a huge stall (tab backgrounded, breakpoint, etc.)
-      // turning into a burst of hundreds of catch-up steps at once.
-      physicsAccum = Math.min(physicsAccum, FIXED_DT * 8);
-
-      while (physicsAccum >= FIXED_DT) {
-        physicsAccum -= FIXED_DT;
-        // Remember where we were before this fixed step, so we can
-        // interpolate the render position between here and the new me.x/y
-        // below (see renderMe declaration for why).
-        prevMe.x = me.x;
-        prevMe.y = me.y;
-        const input = {
-          left:  !typing && !!(keys['a'] || keys['arrowleft']),
-          right: !typing && !!(keys['d'] || keys['arrowright']),
-          jump:  !typing && !!(keys['w'] || keys['arrowup'] || keys[' '])
-        };
-        stepMovement(input, FIXED_DT);
-
-        inputSeq++;
-        pendingInputs.push({ seq: inputSeq, left: input.left, right: input.right, jump: input.jump });
-        // Cap the buffer defensively — normal round trips clear it within a
-        // handful of entries; this only matters if the connection drops
-        // for a long stretch.
-        if (pendingInputs.length > 200) pendingInputs.shift();
-
-        if (ws && wsAuthed && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'input', seq: inputSeq,
-            left: input.left, right: input.right, jump: input.jump,
-            aimAngle
-          }));
-        }
+      fixedAccumulator += dt;
+      fixedAccumulator = Math.min(fixedAccumulator, FIXED_DT * 10); // avoid a huge catch-up burst after a long background tab
+      while (fixedAccumulator >= FIXED_DT) {
+        prevSimX = sim.x; prevSimY = sim.y;
+        fixedStep(typing);
+        fixedAccumulator -= FIXED_DT;
       }
-    }
 
-    // No per-frame position reconciliation: reconciliation happens once per
-    // server snapshot, in applyServerState, by snapping to the server's
-    // exact fixed-step state and replaying any of our inputs it hasn't
-    // processed yet — see the comment there for why this is the standard
-    // approach for prediction that stays both responsive and correct.
+      // Render position = interpolated between the last two physics ticks,
+      // so movement still looks like 60fps even though sim only ticks at 20Hz.
+      const alpha = fixedAccumulator / FIXED_DT;
+      me.x  = lerp(prevSimX, sim.x, alpha);
+      me.y  = lerp(prevSimY, sim.y, alpha);
+      me.vy = sim.vy;
 
-    // Blend prevMe -> me using how far we are into the *next* fixed step
-    // (leftover physicsAccum). If physics just ran this frame, alpha is
-    // near 0 and renderMe sits at prevMe; by the time the next step is due,
-    // alpha nears 1 and renderMe has caught up to me — smooth every frame
-    // regardless of how physics-step timing lines up with render timing.
-    // While dead, just hold at the current me (no stepping is happening).
-    if (myAlive) {
-      const alpha = Math.min(1, physicsAccum / FIXED_DT);
-      renderMe.x = lerp(prevMe.x, me.x, alpha);
-      renderMe.y = lerp(prevMe.y, me.y, alpha);
+      // Passive regen prediction between snapshots — the server is still
+      // the real authority (myHealth gets overwritten by each snapshot),
+      // this just keeps the health bar creeping up smoothly in between.
+      if (myHealth < MAX_HEALTH && (now - lastDamageAt) > REGEN_DELAY_MS) {
+        myHealth = Math.min(MAX_HEALTH, myHealth + REGEN_PER_SEC * dt);
+      }
     } else {
-      renderMe.x = me.x;
-      renderMe.y = me.y;
+      fixedAccumulator = 0;
     }
 
-    const nowMs = Date.now();
-    others.forEach((p, id) => {
-      if (nowMs - p.updated_at > STALE_MS) {
-        others.delete(id);
-        return;
-      }
+    // Presence pruning is server-driven too (applyServerState drops anyone
+    // missing from the snapshot) — this is just per-frame visual smoothing.
+    others.forEach((p) => {
       p.x = lerp(p.x, p.tx, LERP_FACTOR);
       p.y = lerp(p.y, p.ty, LERP_FACTOR);
     });
@@ -1219,46 +1149,30 @@
     draw();
   }
 
+  // Damage, death, and despawn are all decided server-side now (see
+  // applyServerState's bullet reconciliation + events handling). This just
+  // moves what's currently on screen: predicted bullets get real local
+  // physics for instant feedback the moment they're fired; everything else
+  // (server-confirmed bullets, including our own once matched) blends
+  // toward the latest authoritative position each snapshot.
   function updateBullets(dt) {
     bullets.forEach((b, id) => {
-      b.vy += BULLET_GRAVITY * dt;
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
+      if (b.mode === 'predicted') {
+        b.vy += BULLET_GRAVITY * dt;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
 
-      if (b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) { bullets.delete(id); return; }
+        if (b.x < 0 || b.x > WORLD_W || b.y < 0 || b.y > WORLD_H) { bullets.delete(id); return; }
 
-      for (const p of platforms) {
-        if (b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h) {
-          bullets.delete(id);
-          impacts.push({ x: b.x, y: b.y, color: '#9aa1b2', at: performance.now() });
-          return;
+        for (const p of platforms) {
+          if (b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h) {
+            bullets.delete(id);
+            return; // no local impact spark here — the server's own impact event covers it
+          }
         }
-      }
-
-      // Visual-only: a bullet should vanish the instant it looks like it hit
-      // ANY player, on every client watching — the server has already
-      // resolved the real damage independently and tells us via `events`
-      // in applyServerState; this just keeps the bullet from visibly
-      // flying through someone it clearly just tagged.
-      let hitOther = false;
-      if (b.ownerId !== currentUser.id && myAlive) {
-        const ddx = b.x - me.x, ddy = b.y - me.y;
-        if (ddx * ddx + ddy * ddy <= HIT_RADIUS * HIT_RADIUS) hitOther = true;
-      }
-      others.forEach((p) => {
-        if (hitOther || p.alive === false || p.id === b.ownerId) return;
-        const ddx = b.x - p.x, ddy = b.y - p.y;
-        if (ddx * ddx + ddy * ddy <= HIT_RADIUS * HIT_RADIUS) hitOther = true;
-      });
-      
-      if (hitOther) {
-        bullets.delete(id);
-        if (currentUser && b.ownerId === currentUser.id) {
-          hitLandedAt = performance.now();
-          impacts.push({ x: b.x, y: b.y, color: '#ffd166', at: performance.now(), text: '-' + BULLET_DAMAGE });
-        } else {
-          impacts.push({ x: b.x, y: b.y, color: '#ff6b6b', at: performance.now() });
-        }
+      } else {
+        b.x = lerp(b.x, b.tx, BULLET_LERP_FACTOR);
+        b.y = lerp(b.y, b.ty, BULLET_LERP_FACTOR);
       }
     });
   }
@@ -1593,14 +1507,13 @@
       }
     });
 
-    // Render position, not raw me.x/me.y — see renderMe declaration.
-    drawPlayer(renderMe.x, renderMe.y, myColor, myUsername, true, myHealth, myAlive);
+    drawPlayer(me.x, me.y, myColor, myUsername, true, myHealth, myAlive);
     if (myAlive) {
-      drawTrajectoryPreview(renderMe.x, renderMe.y, aimAngle, myColor);
-      drawAimLine(renderMe.x, renderMe.y, aimAngle, myColor);
+      drawTrajectoryPreview(me.x, me.y, aimAngle, myColor);
+      drawAimLine(me.x, me.y, aimAngle, myColor);
     }
     if (myAlive && myChatBubbleText) {
-      drawChatBubble(renderMe.x, renderMe.y, myChatBubbleText, nowPerf - myChatBubbleAt);
+      drawChatBubble(me.x, me.y, myChatBubbleText, nowPerf - myChatBubbleAt);
     }
 
     ctx.restore();
@@ -1619,17 +1532,6 @@
       ctx.fillStyle = '#e9ebf1';
       ctx.font = '15px Arial';
       ctx.fillText(`Respawning in ${secsLeft.toFixed(1)}s`, canvas.width / 2, canvas.height / 2 + 20);
-    }
-
-    // Kill popup text
-    if (nowPerf - recentKillAt < 3000) {
-      ctx.fillStyle = '#ffd166';
-      ctx.font = 'bold 18px Arial';
-      ctx.textAlign = 'center';
-      ctx.shadowColor = 'rgba(0,0,0,0.8)';
-      ctx.shadowBlur = 4;
-      ctx.fillText(recentKillText, canvas.width / 2, canvas.height - 80);
-      ctx.shadowBlur = 0;
     }
 
     $playerCount.textContent = liveCount;
