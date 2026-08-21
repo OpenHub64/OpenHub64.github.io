@@ -390,8 +390,20 @@
   // feel; this is only used to gently correct drift, and to know our real
   // health/alive/respawn state, which the server — not us — decides.
   let srvMe = null; // { x, y, health, alive, respawnInMs }
-  const RECONCILE_DEADZONE = 45;   // px — under this, trust local prediction, do nothing
-  const RECONCILE_PULL     = 0.12; // fraction of the gap closed per frame once past the deadzone
+
+  // Reconciliation, Minecraft-style: trust local prediction completely,
+  // frame to frame. Ordinary network latency (even 150-200ms) naturally
+  // produces tens of px of "gap" between our prediction and the server's
+  // last-known position *during normal movement* — that's expected, not
+  // desync, and correcting for it every frame is exactly what caused the
+  // jitter (constantly tugging against our own physics as it runs).
+  // Instead: only act when the gap is both large AND sustained across
+  // multiple snapshots in a row — that pattern means something's actually
+  // wrong (e.g. dropped input packets, a stall, floating/desync), not
+  // just ordinary lag — and even then, snap once rather than blending.
+  const RECONCILE_SNAP_DIST   = 140;  // px — must be off by at least this much
+  const RECONCILE_SUSTAIN_MS  = 350;  // ...continuously for at least this long
+  let reconcileDivergedSince = null;
 
   // Bullet ids we've already spawned a local visual copy for (own shots are
   // spawned instantly on click; other players' shots are spawned the first
@@ -908,6 +920,7 @@
           onGround  = !!row.onGround;
           jumpsUsed = 0;
           lastDamageAt = -Infinity;
+          reconcileDivergedSince = null;
 
           const viewW = canvas.width / ZOOM;
           const viewH = canvas.height / ZOOM;
@@ -1085,17 +1098,27 @@
       // Gravity/physics still apply while typing — only move/jump input is blocked.
       applyPhysics(dt, !typing);
 
-      // Gently pull our predicted position back toward the server's last
-      // known truth if (and only if) they've drifted apart by more than a
-      // small deadzone — e.g. a missed input packet or a brief stall. Small,
-      // continuous, everyday latency never triggers this, which is what
-      // keeps this from feeling like rubberbanding.
+      // Correct only for a real, sustained divergence (see comment above) —
+      // e.g. several dropped input packets in a row, or the server's physics
+      // disagreeing with ours for some other reason (floating, stuck on a
+      // platform edge, etc). One noisy snapshot never triggers this.
       if (srvMe && srvMe.alive) {
         const ddx = srvMe.x - me.x, ddy = srvMe.y - me.y;
         const dist = Math.sqrt(ddx * ddx + ddy * ddy);
-        if (dist > RECONCILE_DEADZONE) {
-          me.x += ddx * RECONCILE_PULL;
-          me.y += ddy * RECONCILE_PULL;
+
+        if (dist > RECONCILE_SNAP_DIST) {
+          if (reconcileDivergedSince === null) reconcileDivergedSince = now;
+          if (now - reconcileDivergedSince > RECONCILE_SUSTAIN_MS) {
+            // Snap cleanly to the server's truth once, instead of a
+            // per-frame blend that would fight our own gravity/collision
+            // every tick and read as jitter.
+            me.x = srvMe.x;
+            me.y = srvMe.y;
+            me.vy = 0;
+            reconcileDivergedSince = null;
+          }
+        } else {
+          reconcileDivergedSince = null;
         }
       }
     }
