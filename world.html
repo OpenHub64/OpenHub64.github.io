@@ -320,6 +320,18 @@
   let moveVel    = 0; // horizontal velocity — accelerates/decelerates rather than snapping
   let onGround   = false;
   let jumpsUsed  = 0;
+
+  // Fixed-step movement + input replay buffer. Movement/jump/gravity/
+  // collision run in fixed 50ms steps — identical to the server's own tick
+  // — instead of once per variable-length render frame. That's what makes
+  // replay below actually reproduce the server's result: stepping the same
+  // equations by two different-sized dt's is not guaranteed to land in the
+  // same place, especially right at a platform edge, which was the root
+  // cause of "I landed, the server didn't."
+  const FIXED_DT = 1 / 20; // seconds — must match index.js TICK_HZ
+  let physicsAccum = 0;
+  let inputSeq = 0;
+  const pendingInputs = []; // [{ seq, left, right, jump }], oldest first
   let jumpKeyHeld = false;
 
   let myHealth    = MAX_HEALTH;
@@ -383,28 +395,12 @@
   let wsAuthed = false;
   let wsReconnectDelay = 1000; // backs off on repeated failures, resets on a good connection
   const WS_RECONNECT_MAX_MS = 8000;
-  const INPUT_SEND_HZ = 20;
 
   // Last authoritative snapshot of *our own* player from the server. We
   // keep predicting locally every frame (applyPhysics below) for zero-lag
   // feel; this is only used to gently correct drift, and to know our real
   // health/alive/respawn state, which the server — not us — decides.
-  let srvMe = null; // { x, y, health, alive, respawnInMs }
-
-  // Desync correction: position is simulated locally every frame (above),
-  // but we still check it against the server's authoritative copy each
-  // time a snapshot arrives (20/sec) — not every render frame, so this
-  // can't fight the physics loop the way the old per-frame blend did.
-  // The bar to correct is deliberately high and needs to hold for a
-  // while: normal play — including ordinary lag — never gets anywhere
-  // close to it, since client and server run identical physics off the
-  // same inputs. What DOES cross it: dropped input packets piling up,
-  // a client that's stalled, or a modified client lying about its
-  // position — real desync, not lag. When it fires, it's a single clean
-  // teleport to the true spot, not a gradual pull.
-  const DESYNC_SNAP_DIST  = 220;  // px — roughly a full player-width+ off
-  const DESYNC_SUSTAIN_MS = 600;  // ...and stays that far off this long
-  let desyncSince = null;
+  let srvMe = null; // { x, y, vy, moveVel, onGround, jumpsUsed, jumpKeyHeld, lastInputSeq, health, alive, respawnInMs }
 
   // Bullet ids we've already spawned a local visual copy for (own shots are
   // spawned instantly on click; other players' shots are spawned the first
@@ -787,19 +783,9 @@
 
     // Movement/aim goes to the authoritative WS server, not Supabase — it
     // owns physics, health, and combat now. Connect once we have a session.
+    // Input itself is sent per fixed physics step inside loop(), not on a
+    // separate timer — see the accumulator there.
     connectToServer();
-
-    setInterval(() => {
-      if (!ws || !wsAuthed || ws.readyState !== WebSocket.OPEN) return;
-      const typing = document.activeElement === $chatInput;
-      ws.send(JSON.stringify({
-        type: 'input',
-        left:  !typing && !!(keys['a'] || keys['arrowleft']),
-        right: !typing && !!(keys['d'] || keys['arrowright']),
-        jump:  !typing && !!(keys['w'] || keys['arrowup'] || keys[' ']),
-        aimAngle
-      }));
-    }, Math.floor(1000 / INPUT_SEND_HZ));
 
     window.addEventListener('beforeunload', () => {
       broadcastChannel.send({
@@ -926,26 +912,29 @@
           const viewH = canvas.height / ZOOM;
           camera.x = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
           camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
-          desyncSince = null;
+          pendingInputs.length = 0; // discard prediction history from before the respawn
         } else if (row.alive) {
-          // Desync check — see the constants comment above. Evaluated once
-          // per incoming snapshot (20/sec), not per render frame, so it
-          // can never fight the local physics loop the way a per-frame
-          // pull would.
-          const ddx = row.x - me.x, ddy = row.y - me.y;
-          const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+          // Reconcile: snap straight to the server's authoritative
+          // fixed-step state for the tick it just processed (row.lastInputSeq),
+          // then replay every input we've sent since that hasn't been
+          // accounted for yet. If our prediction agreed with the server,
+          // replay reproduces the exact same end position — invisible. If
+          // it didn't (dropped packet, a stall, a real desync), this
+          // corrects it immediately and smoothly, because the correction
+          // is expressed as physics steps, not a teleport.
+          me.x      = row.x;
+          me.y      = row.y;
+          me.vy     = row.vy;
+          moveVel   = row.moveVel;
+          onGround  = row.onGround;
+          jumpsUsed = row.jumpsUsed;
+          jumpKeyHeld = row.jumpKeyHeld;
 
-          if (dist > DESYNC_SNAP_DIST) {
-            if (desyncSince === null) desyncSince = nowMs;
-            if (nowMs - desyncSince > DESYNC_SUSTAIN_MS) {
-              me.x = row.x;
-              me.y = row.y;
-              me.vy = 0;
-              moveVel = 0;
-              desyncSince = null;
-            }
-          } else {
-            desyncSince = null;
+          while (pendingInputs.length && pendingInputs[0].seq <= row.lastInputSeq) {
+            pendingInputs.shift();
+          }
+          for (const input of pendingInputs) {
+            stepMovement(input, FIXED_DT);
           }
         }
         return;
@@ -1008,46 +997,74 @@
   // ─── Game loop ───────────────────────────────────────────────────────────────
   let lastFrame = performance.now();
 
-  function applyPhysics(dt, allowMoveAndJump) {
-    if (allowMoveAndJump) {
-      let dxInput = 0;
-      if (keys['a'] || keys['arrowleft'])  dxInput -= 1;
-      if (keys['d'] || keys['arrowright']) dxInput += 1;
+  function stepMovement(input, dt) {
+    let dxInput = 0;
+    if (input.left)  dxInput -= 1;
+    if (input.right) dxInput += 1;
 
-      const topSpeed = myHealth <= LOW_HEALTH_THRESHOLD
-        ? BASE_MOVE_SPEED * LOW_HEALTH_SPEED_MULT
-        : BASE_MOVE_SPEED;
+    const topSpeed = myHealth <= LOW_HEALTH_THRESHOLD
+      ? BASE_MOVE_SPEED * LOW_HEALTH_SPEED_MULT
+      : BASE_MOVE_SPEED;
 
-      if (dxInput !== 0) {
-        moveVel += dxInput * MOVE_ACCEL * dt;
-        moveVel = Math.max(-topSpeed, Math.min(topSpeed, moveVel));
-      } else {
-        const friction = MOVE_FRICTION * dt;
-        if (moveVel > 0) moveVel = Math.max(0, moveVel - friction);
-        else if (moveVel < 0) moveVel = Math.min(0, moveVel + friction);
-      }
-      // Also clamp toward the (possibly lower, at low health) top speed even
-      // while already moving faster, so the penalty kicks in immediately.
+    if (dxInput !== 0) {
+      moveVel += dxInput * MOVE_ACCEL * dt;
       moveVel = Math.max(-topSpeed, Math.min(topSpeed, moveVel));
+    } else {
+      const friction = MOVE_FRICTION * dt;
+      if (moveVel > 0) moveVel = Math.max(0, moveVel - friction);
+      else if (moveVel < 0) moveVel = Math.min(0, moveVel + friction);
+    }
+    moveVel = Math.max(-topSpeed, Math.min(topSpeed, moveVel));
 
-      me.x = me.x + moveVel * dt;
-      me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x));
+    me.x = me.x + moveVel * dt;
+    me.x = Math.max(PLAYER_SIZE / 2, Math.min(WORLD_W - PLAYER_SIZE / 2, me.x));
 
-      const jumpKeyDown = keys['w'] || keys['arrowup'] || keys[' '];
-      if (jumpKeyDown && !jumpKeyHeld) {
-        if (onGround) {
-          me.vy = JUMP_VELOCITY;
-          onGround = false;
-          jumpsUsed = 1;
-        } else if (jumpsUsed === 1) {
-          me.vy = DOUBLE_JUMP_VELOCITY;
-          jumpsUsed = 2;
-        }
+    if (input.jump && !jumpKeyHeld) {
+      if (onGround) {
+        me.vy = JUMP_VELOCITY;
+        onGround = false;
+        jumpsUsed = 1;
+      } else if (jumpsUsed === 1) {
+        me.vy = DOUBLE_JUMP_VELOCITY;
+        jumpsUsed = 2;
       }
-      jumpKeyHeld = jumpKeyDown;
+    }
+    jumpKeyHeld = !!input.jump;
 
-      // Aim: I rotates counter-clockwise, P rotates clockwise, instantly —
-      // no inertia or coasting, so it always tracks input exactly.
+    me.vy = Math.min(me.vy + GRAVITY * dt, MAX_FALL_SPEED);
+    const prevBottom = me.y + PLAYER_SIZE / 2;
+    me.y += me.vy * dt;
+
+    onGround = false;
+    const half = PLAYER_SIZE / 2;
+    const feetY = me.y + half;
+    const left  = me.x - half * 0.8;
+    const right = me.x + half * 0.8;
+
+    for (const p of platforms) {
+      const withinX = right > p.x && left < p.x + p.w;
+      if (!withinX) continue;
+      const platTop = p.y;
+      if (me.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
+        me.y = platTop - half;
+        me.vy = 0;
+        onGround = true;
+        jumpsUsed = 0;
+        break;
+      }
+    }
+
+    if (me.y - half < 0) { me.y = half; me.vy = Math.max(me.vy, 0); }
+    if (me.y + half > WORLD_H) { me.y = WORLD_H - half; me.vy = 0; onGround = true; jumpsUsed = 0; }
+  }
+
+  function applyPhysics(dt, allowMoveAndJump) {
+    // Aim rotation is purely cosmetic (only the final aimAngle is ever sent
+    // to or checked by the server, for bullet direction) — it stays on the
+    // per-frame variable-dt loop below for smoothness. Movement/jump/
+    // gravity/collision run separately, in fixed steps (see loop()), so
+    // they can be replayed deterministically during reconciliation.
+    if (allowMoveAndJump) {
       const assist = findAimAssistTarget();
 
       // Mechanic 1 — slowdown: friction that reduces turn speed the closer
@@ -1077,32 +1094,6 @@
       if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
       if (aimAngle < -Math.PI) aimAngle += Math.PI * 2;
     }
-
-    me.vy = Math.min(me.vy + GRAVITY * dt, MAX_FALL_SPEED);
-    const prevBottom = me.y + PLAYER_SIZE / 2;
-    me.y += me.vy * dt;
-
-    onGround = false;
-    const half = PLAYER_SIZE / 2;
-    const feetY = me.y + half;
-    const left  = me.x - half * 0.8;
-    const right = me.x + half * 0.8;
-
-    for (const p of platforms) {
-      const withinX = right > p.x && left < p.x + p.w;
-      if (!withinX) continue;
-      const platTop = p.y;
-      if (me.vy >= 0 && prevBottom <= platTop + 1 && feetY >= platTop) {
-        me.y = platTop - half;
-        me.vy = 0;
-        onGround = true;
-        jumpsUsed = 0;
-        break;
-      }
-    }
-
-    if (me.y - half < 0) { me.y = half; me.vy = Math.max(me.vy, 0); }
-    if (me.y + half > WORLD_H) { me.y = WORLD_H - half; me.vy = 0; onGround = true; jumpsUsed = 0; }
   }
 
   function loop() {
@@ -1116,15 +1107,48 @@
     // applyServerState) — we just don't run movement while dead, and don't
     // touch me.x/me.y/myHealth ourselves while waiting for it.
     if (myAlive) {
-      // Gravity/physics still apply while typing — only move/jump input is blocked.
+      // Aim rotation is cosmetic and runs every frame for smoothness (see
+      // applyPhysics). Movement/jump/gravity/collision run separately, in
+      // fixed 50ms steps, catching up via this accumulator — same pattern
+      // a physics engine uses to decouple simulation rate from frame rate.
       applyPhysics(dt, !typing);
 
-    // No per-frame position reconciliation: client and server run the
-    // identical deterministic physics off the same inputs, so they
-    // naturally stay in close agreement without correction — see the
-    // desync check in applyServerState, which runs once per server
-    // snapshot instead of every render frame, for exactly this reason.
+      physicsAccum += dt;
+      // Guard against a huge stall (tab backgrounded, breakpoint, etc.)
+      // turning into a burst of hundreds of catch-up steps at once.
+      physicsAccum = Math.min(physicsAccum, FIXED_DT * 8);
+
+      while (physicsAccum >= FIXED_DT) {
+        physicsAccum -= FIXED_DT;
+        const input = {
+          left:  !typing && !!(keys['a'] || keys['arrowleft']),
+          right: !typing && !!(keys['d'] || keys['arrowright']),
+          jump:  !typing && !!(keys['w'] || keys['arrowup'] || keys[' '])
+        };
+        stepMovement(input, FIXED_DT);
+
+        inputSeq++;
+        pendingInputs.push({ seq: inputSeq, left: input.left, right: input.right, jump: input.jump });
+        // Cap the buffer defensively — normal round trips clear it within a
+        // handful of entries; this only matters if the connection drops
+        // for a long stretch.
+        if (pendingInputs.length > 200) pendingInputs.shift();
+
+        if (ws && wsAuthed && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'input', seq: inputSeq,
+            left: input.left, right: input.right, jump: input.jump,
+            aimAngle
+          }));
+        }
+      }
     }
+
+    // No per-frame position reconciliation: reconciliation happens once per
+    // server snapshot, in applyServerState, by snapping to the server's
+    // exact fixed-step state and replaying any of our inputs it hasn't
+    // processed yet — see the comment there for why this is the standard
+    // approach for prediction that stays both responsive and correct.
 
     const nowMs = Date.now();
     others.forEach((p, id) => {
