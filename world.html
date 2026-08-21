@@ -230,6 +230,9 @@
   const STALE_MS      = 20000;     // remove players silent this long (must exceed HEARTBEAT_MS with margin)
   const LERP_FACTOR   = 0.18;      // interpolation per frame for other players — tune 0.10 (smoother) – 0.25 (snappier)
 
+  let recentKillText = '';
+  let recentKillAt = -Infinity;
+
   // Camera follows the local player around the (much bigger) world. Position
   // is the world coordinate of the viewport's top-left corner, clamped so it
   // never shows past the world edges.
@@ -1000,14 +1003,24 @@
     if (msg.events && msg.events.length) {
       msg.events.forEach((ev) => {
         if (ev.kind === 'impact') {
+          if (currentUser && ev.shooterId === currentUser.id) return;
           impacts.push({ x: ev.x, y: ev.y, color: '#9aa1b2', at: performance.now() });
         } else if (ev.kind === 'hit') {
           if (currentUser && ev.targetId === currentUser.id) {
             hitFlashAt = performance.now();
             impacts.push({ x: ev.x, y: ev.y, color: '#ff6b6b', at: performance.now() });
-          } else if (currentUser && ev.shooterId === currentUser.id) {
-            hitLandedAt = performance.now();
-            impacts.push({ x: ev.x, y: ev.y, color: '#ffd166', at: performance.now(), text: '-' + ev.damage });
+          }
+        } else if (ev.kind === 'kill') {
+          const killer = ev.shooterId === currentUser?.id ? myUsername : (others.get(ev.shooterId)?.username || 'Anon');
+          const victim = ev.targetId === currentUser?.id ? myUsername : (others.get(ev.targetId)?.username || 'Anon');
+          const puns = ['smashed', 'bamboozled', 'obliterated', 'rekt'];
+          const pun = puns[Math.floor(Math.random() * puns.length)];
+
+          appendChatLine(`<span class="chat-system">💀 ${victim} was ${pun} by ${killer}!</span>`);
+
+          if (ev.shooterId === currentUser?.id) {
+            recentKillText = `You killed ${victim}!`;
+            recentKillAt = performance.now();
           }
         }
       });
@@ -1237,9 +1250,15 @@
         const ddx = b.x - p.x, ddy = b.y - p.y;
         if (ddx * ddx + ddy * ddy <= HIT_RADIUS * HIT_RADIUS) hitOther = true;
       });
+      
       if (hitOther) {
         bullets.delete(id);
-        impacts.push({ x: b.x, y: b.y, color: '#ff6b6b', at: performance.now() });
+        if (currentUser && b.ownerId === currentUser.id) {
+          hitLandedAt = performance.now();
+          impacts.push({ x: b.x, y: b.y, color: '#ffd166', at: performance.now(), text: '-' + BULLET_DAMAGE });
+        } else {
+          impacts.push({ x: b.x, y: b.y, color: '#ff6b6b', at: performance.now() });
+        }
       }
     });
   }
@@ -1600,6 +1619,17 @@
       ctx.fillStyle = '#e9ebf1';
       ctx.font = '15px Arial';
       ctx.fillText(`Respawning in ${secsLeft.toFixed(1)}s`, canvas.width / 2, canvas.height / 2 + 20);
+    }
+
+    // Kill popup text
+    if (nowPerf - recentKillAt < 3000) {
+      ctx.fillStyle = '#ffd166';
+      ctx.font = 'bold 18px Arial';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 4;
+      ctx.fillText(recentKillText, canvas.width / 2, canvas.height - 80);
+      ctx.shadowBlur = 0;
     }
 
     $playerCount.textContent = liveCount;
