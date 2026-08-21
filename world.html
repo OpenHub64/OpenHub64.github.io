@@ -389,7 +389,22 @@
   // keep predicting locally every frame (applyPhysics below) for zero-lag
   // feel; this is only used to gently correct drift, and to know our real
   // health/alive/respawn state, which the server — not us — decides.
-  let srvMe = null; // { health, alive, respawnInMs } — position intentionally not consumed, see below
+  let srvMe = null; // { x, y, health, alive, respawnInMs }
+
+  // Desync correction: position is simulated locally every frame (above),
+  // but we still check it against the server's authoritative copy each
+  // time a snapshot arrives (20/sec) — not every render frame, so this
+  // can't fight the physics loop the way the old per-frame blend did.
+  // The bar to correct is deliberately high and needs to hold for a
+  // while: normal play — including ordinary lag — never gets anywhere
+  // close to it, since client and server run identical physics off the
+  // same inputs. What DOES cross it: dropped input packets piling up,
+  // a client that's stalled, or a modified client lying about its
+  // position — real desync, not lag. When it fires, it's a single clean
+  // teleport to the true spot, not a gradual pull.
+  const DESYNC_SNAP_DIST  = 220;  // px — roughly a full player-width+ off
+  const DESYNC_SUSTAIN_MS = 600;  // ...and stays that far off this long
+  let desyncSince = null;
 
   // Bullet ids we've already spawned a local visual copy for (own shots are
   // spawned instantly on click; other players' shots are spawned the first
@@ -911,6 +926,27 @@
           const viewH = canvas.height / ZOOM;
           camera.x = Math.max(0, Math.min(WORLD_W - viewW, me.x - viewW / 2));
           camera.y = Math.max(0, Math.min(WORLD_H - viewH, me.y - viewH / 2));
+          desyncSince = null;
+        } else if (row.alive) {
+          // Desync check — see the constants comment above. Evaluated once
+          // per incoming snapshot (20/sec), not per render frame, so it
+          // can never fight the local physics loop the way a per-frame
+          // pull would.
+          const ddx = row.x - me.x, ddy = row.y - me.y;
+          const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+
+          if (dist > DESYNC_SNAP_DIST) {
+            if (desyncSince === null) desyncSince = nowMs;
+            if (nowMs - desyncSince > DESYNC_SUSTAIN_MS) {
+              me.x = row.x;
+              me.y = row.y;
+              me.vy = 0;
+              moveVel = 0;
+              desyncSince = null;
+            }
+          } else {
+            desyncSince = null;
+          }
         }
         return;
       }
@@ -1083,15 +1119,11 @@
       // Gravity/physics still apply while typing — only move/jump input is blocked.
       applyPhysics(dt, !typing);
 
-    // No position reconciliation: client and server run the identical
-    // deterministic physics (same platforms, same constants — see
-    // physics.js) against the same input stream, so they naturally stay in
-    // close agreement without correction. Any snap-to-server-position logic
-    // is visible the instant it fires no matter how it's tuned (that's what
-    // was causing the rubberbanding) — so position is simulated locally,
-    // full stop. The server is only consulted for what the client
-    // genuinely can't know on its own: real health, death/respawn timing,
-    // and hit resolution (handled in applyServerState below).
+    // No per-frame position reconciliation: client and server run the
+    // identical deterministic physics off the same inputs, so they
+    // naturally stay in close agreement without correction — see the
+    // desync check in applyServerState, which runs once per server
+    // snapshot instead of every render frame, for exactly this reason.
     }
 
     const nowMs = Date.now();
