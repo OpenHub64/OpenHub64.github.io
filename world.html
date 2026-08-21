@@ -396,7 +396,14 @@
     lastShotAt = now;
 
     ws.send(JSON.stringify({ type: 'shoot' }));
-    spawnPredictedBullet(me.x, me.y, aimAngle);
+    // Spawn from `sim` (our raw physics position), not `me` (the smoothed
+    // render position) — the server spawns its own copy of this bullet
+    // from ITS physics position, which lines up with `sim`, not with the
+    // render-interpolated point `me` sits at between ticks. Firing from
+    // `me` made the local bullet travel a path parallel to but offset from
+    // the server's real one, so the visual snap when they reconciled
+    // looked like a second bullet appearing.
+    spawnPredictedBullet(sim.x, sim.y, aimAngle);
   }
 
   canvas.addEventListener('mousedown', tryShoot);
