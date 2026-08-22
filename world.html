@@ -938,33 +938,29 @@
     });
     others.forEach((_, id) => { if (!seenIds.has(id)) others.delete(id); });
 
-    // ── Bullets: match our own predicted shots to their server twin,
-    // create/update everyone else's from the snapshot, drop anything the
-    // server no longer knows about (it hit something).
+    // ── Bullets: your OWN shots are shown purely from local prediction,
+    // start to finish — the server's copy of your own bullet is never
+    // looked at, matched, or rendered at all. It still exists server-side
+    // and is still what actually decides hits/damage (via the events
+    // below); this just means there's no server position for your own
+    // bullet to ever get swapped/synced to, so there's nothing left that
+    // can visually jump or duplicate. The tradeoff: your own bullet's
+    // flight is only as accurate as local physics — which uses the same
+    // constants and platform layout as the server, so it should agree
+    // almost always, just not with byte-for-byte precision.
+    //
+    // Everyone else's bullets are still tracked normally from the
+    // snapshot, since we have no way to predict shots we didn't fire.
     const seenBulletIds = new Set();
     (msg.bullets || []).forEach((sb) => {
+      if (sb.ownerId === currentUser.id) return; // never touch our own — see above
       seenBulletIds.add(sb.id);
       const existing = bullets.get(sb.id);
       if (existing) {
-        existing.tx = sb.x; existing.ty = sb.y; existing.mode = 'synced';
+        existing.tx = sb.x; existing.ty = sb.y;
         return;
       }
-      if (sb.ownerId === currentUser.id) {
-        let predictedId = null;
-        bullets.forEach((b, id) => {
-          if (!predictedId && b.mode === 'predicted' && b.ownerId === currentUser.id) predictedId = id;
-        });
-        if (predictedId) {
-          const b = bullets.get(predictedId);
-          bullets.delete(predictedId);
-          b.tx = sb.x; b.ty = sb.y; b.mode = 'synced';
-          bullets.set(sb.id, b);
-          return;
-        }
-      }
-      const ownerColor = sb.ownerId === currentUser.id
-        ? myColor
-        : ((others.get(sb.ownerId) || {}).color || '#fff');
+      const ownerColor = (others.get(sb.ownerId) || {}).color || '#fff';
       bullets.set(sb.id, {
         ownerId: sb.ownerId, color: ownerColor,
         x: sb.x, y: sb.y, tx: sb.x, ty: sb.y, mode: 'synced'
@@ -972,18 +968,11 @@
     });
     bullets.forEach((b, id) => {
       if (seenBulletIds.has(id)) return;
-      // Predicted bullets manage their own lifecycle locally (bounds/
-      // platform/hit checks run every frame in updateBullets) — they don't
-      // need to appear in a snapshot to be legitimately still alive. A
-      // fast/laggy round-trip can easily take longer than one tick, and
-      // pruning on a short timer here was deleting the prediction before
-      // its real server-side match ever showed up — so when the real one
-      // finally arrived, there was nothing left to match it against, and a
-      // brand-new bullet got created from scratch. Looked exactly like a
-      // second shot. Only a generous safety-net timeout remains, purely to
-      // avoid a permanent leak in a truly pathological case (e.g. it
-      // resolved same-tick server-side and will just never appear in any
-      // snapshot at all).
+      // Our own predicted bullets are never in seenBulletIds (we don't
+      // even look at their server twin anymore) — they live and die
+      // entirely by their own local simulation in updateBullets. This
+      // safety-net timeout only guards against an actual leak if one
+      // somehow never resolves locally.
       if (b.mode === 'predicted' && performance.now() - b.createdAt < 3000) return;
       bullets.delete(id);
     });
@@ -1217,21 +1206,21 @@
     draw();
   }
 
-  // Damage, death, and despawn are all decided server-side now (see
-  // applyServerState's bullet reconciliation + events handling). This just
-  // moves what's currently on screen: predicted bullets get real local
-  // physics for instant feedback the moment they're fired; everything else
-  // (server-confirmed bullets, including our own once matched) blends
-  // toward the latest authoritative position each snapshot.
+  // Damage, death, and kills are decided server-side (see applyServerState's
+  // events handling) — that's unaffected by anything here. This is purely
+  // visual: your own ('predicted') bullets are simulated with real local
+  // physics for their entire flight and never touch server data; everyone
+  // else's ('synced') bullets blend toward the latest authoritative
+  // position each snapshot, same as before.
   //
-  // Predicted bullets also get an instant, purely-cosmetic hit check
-  // against `others` (client-only, mirrors the server's HIT_RADIUS check
-  // just for visual timing) — this is what makes the shooter see their
-  // impact spark immediately instead of waiting a full round-trip for the
-  // server's real 'hit' event. Damage/kills are never decided here; if the
-  // server disagrees (rare — target had already moved by the time the shot
-  // actually got there server-side), the spark just isn't followed by a
-  // real hit and nothing else happens.
+  // Predicted (i.e. your own) bullets also get an instant, purely-cosmetic
+  // hit check against `others` (client-only, mirrors the server's
+  // HIT_RADIUS check just for visual timing) — this is what lets the
+  // shooter see their impact spark immediately instead of waiting a full
+  // round-trip for the server's real 'hit' event. Damage/kills are never
+  // decided here; if the server disagrees (rare — target had already moved
+  // by the time the shot actually got there server-side), the spark just
+  // isn't followed by a real hit and nothing else happens.
   const PREDICTED_BULLET_MAX_STEP = 6; // px — matches the server's tunneling fix
 
   function updateBullets(dt) {
