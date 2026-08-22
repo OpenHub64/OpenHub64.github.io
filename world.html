@@ -924,7 +924,13 @@
       applyServerState(msg);
       return;
     }
-    // 'playerCount' is redundant with what draw() derives from `others` — ignored.
+    if (msg.type === 'playerCount') {
+      // The true global count — `others` is distance-filtered now (see
+      // VISIBILITY_RADIUS server-side), so it can no longer be used to
+      // derive this the way it used to.
+      $playerCount.textContent = msg.count;
+      return;
+    }
   }
 
   // Reconciles local prediction against one authoritative 'state' snapshot:
@@ -1080,8 +1086,8 @@
         // event arrived, which on a slower connection could be well
         // outside any reasonable dedup window.
       } else if (ev.kind === 'kill') {
-        const shooterName = nameForId(ev.shooterId);
-        const targetName  = nameForId(ev.targetId);
+        const shooterName = ev.shooterName || nameForId(ev.shooterId);
+        const targetName  = ev.targetName  || nameForId(ev.targetId);
         appendChatLine(
           '<span class="chat-system">' + escapeHtml(shooterName) + ' killed ' + escapeHtml(targetName) + '</span>'
         );
@@ -1675,9 +1681,7 @@
 
     drawImpacts(nowPerf);
 
-    let liveCount = 1;
     others.forEach((p) => {
-      liveCount++;
       const alive = p.alive !== false;
       drawPlayer(p.x, p.y, p.color || '#6ea8ff', p.username || 'Anon', false, p.health ?? MAX_HEALTH, alive);
       if (alive && p.chatText) {
@@ -1711,8 +1715,6 @@
       ctx.font = '15px Arial';
       ctx.fillText(`Respawning in ${secsLeft.toFixed(1)}s`, canvas.width / 2, canvas.height / 2 + 20);
     }
-
-    $playerCount.textContent = liveCount;
   }
 
   init();
