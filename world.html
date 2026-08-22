@@ -558,9 +558,23 @@
 
   // ─── Movement input ──────────────────────────────────────────────────────────
   const keys = Object.create(null);
+
+  // Jump gets special handling: fixedStep only samples key state once every
+  // 50ms (20Hz, matching the server tick), but a real keyboard tap can
+  // complete a full press-and-release faster than that. If the periodic
+  // sample happened to land after release, the jump was fully missed —
+  // never simulated locally, never sent to the server, because the input
+  // never existed at the one instant we checked. jumpQueued captures the
+  // press the moment it happens (event-driven, not polled) and guarantees
+  // it survives into the very next tick regardless of how briefly the key
+  // was actually down for.
+  let jumpQueued = false;
+  const JUMP_KEYS = new Set(['w', 'arrowup', ' ']);
+
   window.addEventListener('keydown', (e) => {
     if (document.activeElement === $chatInput) return; // typing — don't move/jump
     keys[e.key.toLowerCase()] = true;
+    if (JUMP_KEYS.has(e.key.toLowerCase())) jumpQueued = true;
   });
   window.addEventListener('keyup', (e) => {
     if (document.activeElement === $chatInput) return;
@@ -568,6 +582,7 @@
   });
   $chatInput.addEventListener('focus', () => {
     for (const k in keys) keys[k] = false; // release any held movement keys
+    jumpQueued = false; // don't fire a stale queued jump the moment chat is unfocused
   });
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1130,10 +1145,13 @@
   // `sim` with it, records it in the replay buffer, and sends it to the
   // server tagged with its sequence number.
   function fixedStep(typing) {
+    const jump = !typing && (jumpQueued || !!(keys['w'] || keys['arrowup'] || keys[' ']));
+    jumpQueued = false; // consumed — guaranteed to be seen by this tick even if the key already went back up
+
     const input = {
       left:  !typing && !!(keys['a'] || keys['arrowleft']),
       right: !typing && !!(keys['d'] || keys['arrowright']),
-      jump:  !typing && !!(keys['w'] || keys['arrowup'] || keys[' '])
+      jump
     };
 
     inputSeq++;
