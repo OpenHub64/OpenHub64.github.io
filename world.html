@@ -76,6 +76,44 @@
     position: fixed; inset: 0;
     width: 100vw; height: 100vh;
   }
+  #killFeed {
+    position: fixed;
+    left: 50%;
+    bottom: 90px;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    pointer-events: none;
+  }
+  .kill-feed-line {
+    background: rgba(20,22,28,0.75);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3rem 0.85rem;
+    font-size: 0.85rem;
+    font-weight: bold;
+    color: var(--accent);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    animation: killFeedFade 3s ease forwards;
+  }
+  @keyframes killFeedFade {
+    0%   { opacity: 0; transform: translateY(6px); }
+    10%  { opacity: 1; transform: translateY(0); }
+    78%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  #pingCounter {
+    position: fixed; bottom: 12px; right: 12px; z-index: 10;
+    color: var(--muted); font-size: 0.78rem;
+    background: rgba(20,22,28,0.6);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.25rem 0.6rem;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
   canvas {
     display: block; width: 100vw; height: 100vh;
     background: #10131a;
@@ -175,6 +213,9 @@
     <ol id="lbList"></ol>
   </div>
 
+  <div id="killFeed"></div>
+  <div id="pingCounter">-- ms</div>
+
   <div id="chatBox">
     <div id="chatLog"></div>
     <div id="chatInputRow">
@@ -221,6 +262,8 @@
   const $chatInput   = document.getElementById('chatInput');
   const $chatSendBtn = document.getElementById('chatSendBtn');
   const $lbList       = document.getElementById('lbList');
+  const $killFeed     = document.getElementById('killFeed');
+  const $pingCounter  = document.getElementById('pingCounter');
 
   const WORLD_W       = 2600;      // camera follows the player around the level
   const WORLD_H       = 1500;
@@ -445,6 +488,25 @@
       $chatLog.removeChild($chatLog.firstChild);
     }
     $chatLog.scrollTop = $chatLog.scrollHeight;
+  }
+
+  // Every client independently receives the same 'kill' events (they're
+  // part of the same authoritative state broadcast everyone gets), so kill
+  // feed / chat announcements are derived locally from that — no extra
+  // networking needed, and no risk of the announcement being missed if the
+  // shooter's own tab lags or closes right after.
+  function nameForId(id) {
+    if (currentUser && id === currentUser.id) return myUsername;
+    const p = others.get(id);
+    return (p && p.username) || 'Someone';
+  }
+
+  function showKillFeed(text) {
+    const line = document.createElement('div');
+    line.className = 'kill-feed-line';
+    line.textContent = text;
+    $killFeed.appendChild(line);
+    line.addEventListener('animationend', () => line.remove());
   }
 
   function showBubbleFor(id, text) {
@@ -794,6 +856,8 @@
   // ─── Server connection ───────────────────────────────────────────────────────
   let ws = null;
   let wsReconnectDelay = 1000;
+  let pingInterval = null;
+  const PING_INTERVAL_MS = 2000;
 
   async function connectServer() {
     const { data: { session } } = await supabaseClient.auth.getSession();
@@ -804,6 +868,10 @@
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: 'auth', token: session.access_token }));
+      // Ping doesn't require auth server-side, so it's safe to start right
+      // away rather than waiting for authOk — gets a reading a little sooner.
+      sendPing();
+      pingInterval = setInterval(sendPing, PING_INTERVAL_MS);
     };
 
     ws.onmessage = (e) => {
@@ -820,6 +888,8 @@
       // connection's server-side player will recognize — drop them so the
       // next reconciliation replays only fresh, post-reconnect inputs.
       pendingInputs.length = 0;
+      if (pingInterval) clearInterval(pingInterval);
+      $pingCounter.textContent = '-- ms';
       setTimeout(() => {
         wsReconnectDelay = Math.min(wsReconnectDelay * 1.5, 8000);
         connectServer();
@@ -829,7 +899,17 @@
     ws.onerror = () => { /* onclose fires right after and handles it */ };
   }
 
+  function sendPing() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'ping', at: performance.now() }));
+  }
+
   function handleServerMessage(msg) {
+    if (msg.type === 'pong') {
+      const rtt = performance.now() - msg.at;
+      $pingCounter.textContent = Math.max(0, Math.round(rtt)) + ' ms';
+      return;
+    }
     if (msg.type === 'authOk') {
       wsReconnectDelay = 1000;
       myUsername = msg.username || myUsername;
@@ -1000,6 +1080,14 @@
         // event arrived, which on a slower connection could be well
         // outside any reasonable dedup window.
       } else if (ev.kind === 'kill') {
+        const shooterName = nameForId(ev.shooterId);
+        const targetName  = nameForId(ev.targetId);
+        appendChatLine(
+          '<span class="chat-system">' + escapeHtml(shooterName) + ' killed ' + escapeHtml(targetName) + '</span>'
+        );
+        if (ev.shooterId === currentUser.id) {
+          showKillFeed('Killed ' + targetName);
+        }
         if (ev.shooterId === currentUser.id || ev.targetId === currentUser.id) refreshLeaderboard();
       }
     });
