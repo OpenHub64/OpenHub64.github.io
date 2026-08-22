@@ -983,24 +983,22 @@
       if (ev.kind === 'impact') {
         impacts.push({ x: ev.x, y: ev.y, color: '#9aa1b2', at: performance.now() });
       } else if (ev.kind === 'hit') {
-        impacts.push({ x: ev.x, y: ev.y, color: '#ff6b6b', at: performance.now() });
         if (ev.targetId === currentUser.id) {
+          // We got hit — there's no way to predict this locally (we don't
+          // simulate other players' bullets against ourselves), so this
+          // server event is the only source of truth for the visual.
+          impacts.push({ x: ev.x, y: ev.y, color: '#ff6b6b', at: performance.now() });
           hitFlashAt   = performance.now();
           lastDamageAt = performance.now();
         }
-        if (ev.shooterId === currentUser.id) {
-          // Skip the duplicate spark/number if updateBullets already showed
-          // this exact hit as a prediction a moment ago — this is just the
-          // server catching up to confirm something the shooter already saw.
-          const alreadyShown = (performance.now() - hitLandedAt) < 250;
-          hitLandedAt = performance.now();
-          if (!alreadyShown) {
-            impacts.push({
-              x: ev.x, y: ev.y, color: '#ffd166',
-              at: performance.now(), text: '-' + (ev.damage || BULLET_DAMAGE)
-            });
-          }
-        }
+        // If we're the shooter, deliberately do nothing here — the local
+        // predicted-hit check in updateBullets is now the sole source for
+        // that flash/spark (same "only show what the client itself
+        // detected" rule as the bullet visuals). Also showing it here from
+        // the server's confirmation caused it to fire twice: once
+        // instantly from our own detection, once again whenever this
+        // event arrived, which on a slower connection could be well
+        // outside any reasonable dedup window.
       } else if (ev.kind === 'kill') {
         if (ev.shooterId === currentUser.id || ev.targetId === currentUser.id) refreshLeaderboard();
       }
